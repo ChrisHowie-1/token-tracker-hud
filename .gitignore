@@ -1,3 +1,21 @@
+# Build output
 build/
+
+# Compiled Swift objects
 *.o
+*.d
+
+# macOS metadata
 .DS_Store
+**/.DS_Store
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+
+# Local stats cache (runtime-generated)
+local_ai_stats.json
+
+# Python bytecode
+__pycache__/
+*.pyc
