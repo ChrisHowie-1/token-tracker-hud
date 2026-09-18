@@ -1,14 +1,12 @@
 import Cocoa
 import SwiftUI
 
-public class FloatingHUDWindow: NSPanel {
-    public init(contentRect: NSRect) {
-        super.init(
-            contentRect: contentRect,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
+class FloatingHUDWindow: NSPanel {
+    init(contentRect: NSRect) {
+        super.init(contentRect: contentRect,
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered,
+                   defer: false)
 
         self.isFloatingPanel = true
         self.level = .floating
@@ -19,20 +17,21 @@ public class FloatingHUDWindow: NSPanel {
         self.isMovable = true
         self.isOpaque = false
         self.backgroundColor = .clear
-        self.hasShadow = false
+        self.hasShadow = true
         self.isReleasedWhenClosed = false
         self.hidesOnDeactivate = false
+        self.invalidateShadow()
     }
 
-    public override var canBecomeKey: Bool {
+    override var canBecomeKey: Bool {
         return true
     }
 
-    public override var canBecomeMain: Bool {
+    override var canBecomeMain: Bool {
         return false
     }
 
-    public override func mouseDragged(with event: NSEvent) {
+    override func mouseDragged(with event: NSEvent) {
         self.performDrag(with: event)
     }
 }

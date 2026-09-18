@@ -20,36 +20,6 @@ public class DragAreaNSView: NSView {
     }
 }
 
-public struct VisualEffectBackground: NSViewRepresentable {
-    public let material: NSVisualEffectView.Material
-    public let blendingMode: NSVisualEffectView.BlendingMode
-    public let state: NSVisualEffectView.State
-
-    public init(
-        material: NSVisualEffectView.Material = .hudWindow,
-        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
-        state: NSVisualEffectView.State = .active
-    ) {
-        self.material = material
-        self.blendingMode = blendingMode
-        self.state = state
-    }
-
-    public func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = state
-        return view
-    }
-
-    public func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-        nsView.state = state
-    }
-}
-
 public struct FloatingHUDView: View {
     @ObservedObject var watcher: TokenStatsWatcher
     @State private var isHoveringClose = false
@@ -168,28 +138,32 @@ public struct FloatingHUDView: View {
         // Liquid Glass Background
         .background(
             ZStack {
-                // Dynamic macOS behind-window glass blur
-                VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow)
+                // Native continuous frosted glass
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial)
 
                 // Deep dark tint preserving contrast across wallpapers
-                bgMain.opacity(0.82)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(bgMain.opacity(0.82))
 
                 // Liquid glass surface sheen
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.white.opacity(0.12), location: 0.0),
-                        .init(color: Color.white.opacity(0.03), location: 0.25),
-                        .init(color: Color.clear, location: 0.60)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color.white.opacity(0.12), location: 0.0),
+                                .init(color: Color.white.opacity(0.02), location: 0.25),
+                                .init(color: Color.clear, location: 0.60)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             // Liquid glass specular rim highlight
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(
                     LinearGradient(
                         stops: [
@@ -204,8 +178,6 @@ public struct FloatingHUDView: View {
                     lineWidth: 1.2
                 )
         )
-        .shadow(color: Color.black.opacity(0.45), radius: 24, x: 0, y: 12)
-        .shadow(color: Color.black.opacity(0.30), radius: 6, x: 0, y: 3)
     }
 
     @ViewBuilder
@@ -282,7 +254,7 @@ public struct FloatingHUDView: View {
             .frame(height: 8)
         }
         .padding(11)
-        // Card frosted glass container
+        // Card frosted glass container with concentric corner radius (12pt)
         .background(
             ZStack {
                 bgCard.opacity(0.68)
@@ -298,9 +270,9 @@ public struct FloatingHUDView: View {
                 )
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
                     LinearGradient(
                         stops: [

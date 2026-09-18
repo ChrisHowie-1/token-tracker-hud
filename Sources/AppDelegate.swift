@@ -10,8 +10,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     private let hudWidth: CGFloat = 330
-    private let compactHeight: CGFloat = 136
-    private let expandedHeight: CGFloat = 228
+    private let compactHeight: CGFloat = 118
+    private let expandedHeight: CGFloat = 196
 
     private var launchAtLoginItem: NSMenuItem?
 
@@ -118,9 +118,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let rootView = FloatingHUDView(watcher: watcher)
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.autoresizingMask = [.width, .height]
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = 20
+        hostingView.layer?.cornerCurve = .continuous
+        hostingView.layer?.masksToBounds = true
 
         window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
+        window.invalidateShadow()
         self.hudWindow = window
     }
 
@@ -140,6 +145,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] visible in
                 if visible {
                     self?.hudWindow?.orderFront(nil)
+                    self?.hudWindow?.invalidateShadow()
                 } else {
                     self?.hudWindow?.orderOut(nil)
                 }
@@ -172,6 +178,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().setFrame(newFrame, display: true)
+        } completionHandler: {
+            window.invalidateShadow()
         }
     }
 
@@ -200,6 +208,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let newX = screenRect.maxX - hudWidth - 20
         let newY = screenRect.maxY - targetHeight - 20
         window.setFrame(NSRect(x: newX, y: newY, width: hudWidth, height: targetHeight), display: true, animate: true)
+        window.invalidateShadow()
         if !watcher.isHUDVisible {
             watcher.isHUDVisible = true
         }
