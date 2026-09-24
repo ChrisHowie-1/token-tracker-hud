@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "antigravity.tokens",
+  "name": "Token Tracker",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "license": "MIT",
+  "description": "Live Antigravity Gemini Token Tracker and M3 Ultra Stats",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Token Tracker",
+    "description": "Live AI token stats and local M3 Ultra GPU savings",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
