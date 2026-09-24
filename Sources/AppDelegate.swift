@@ -20,6 +20,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         setupHUDWindow()
         bindWatcher()
         ensureLoginItemConfigured()
+        AutoUpdater.shared.startPeriodicChecks()
     }
 
     private func setupMenuBar() {
@@ -67,6 +68,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let refreshNow = NSMenuItem(title: "Refresh Telemetry", action: #selector(refreshAction), keyEquivalent: "")
         refreshNow.target = self
         menu.addItem(refreshNow)
+
+        let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdatesAction), keyEquivalent: "u")
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -218,6 +223,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshAction() {
         watcher.loadStats()
+    }
+
+    @objc private func checkForUpdatesAction() {
+        AutoUpdater.shared.checkForUpdates(manual: true)
     }
 
     @objc private func quitAction() {

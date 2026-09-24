@@ -19,6 +19,7 @@ cp "$DIR/Info.plist" "$TMP_APP/Contents/Info.plist"
 SWIFT_SOURCES=(
     "$DIR/Sources/TokenModel.swift"
     "$DIR/Sources/TokenStatsWatcher.swift"
+    "$DIR/Sources/AutoUpdater.swift"
     "$DIR/Sources/FloatingHUDView.swift"
     "$DIR/Sources/FloatingHUDWindow.swift"
     "$DIR/Sources/AppDelegate.swift"
@@ -43,5 +44,11 @@ codesign --force --deep --sign - "$TMP_APP"
 
 echo "Deploying to workspace..."
 cp -R "$TMP_APP" "$APP_BUNDLE"
+
+if [ -d "/Applications/$APP_NAME.app" ]; then
+    echo "Updating local /Applications/$APP_NAME.app..."
+    rm -rf "/Applications/$APP_NAME.app"
+    cp -R "$TMP_APP" "/Applications/$APP_NAME.app"
+fi
 
 echo "Build complete: $APP_BUNDLE"
