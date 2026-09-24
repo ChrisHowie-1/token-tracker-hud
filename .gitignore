@@ -19,3 +19,4 @@ local_ai_stats.json
 # Python bytecode
 __pycache__/
 *.pyc
+stats.json.sb-*

@@ -36,8 +36,8 @@ Panel {
   readonly property color statusColor: isBusy ? accentGreen : accentBlue
 
   function getCardColor(pct) {
-    if (pct > 50) return accentGreen
-    if (pct > 20) return accentOrange
+    if (pct >= 50) return accentGreen
+    if (pct >= 20) return accentOrange
     return accentRed
   }
 
@@ -80,7 +80,7 @@ Panel {
       anchors.rightMargin: Style.space(6)
       anchors.verticalCenter: parent.verticalCenter
       text: root.lowestTag
-      color: "#70c040"
+      color: root.getCardColor(root.lowestPct)
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: button.fontSize
       font.bold: true
