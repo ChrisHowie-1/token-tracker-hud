@@ -134,6 +134,40 @@ public struct FloatingHUDView: View {
                         limitTag: "(5)",
                         isLowest: watcher.stats.isFiveHourLower
                     )
+
+                    // 3. Claude Reviewer Balance & Top-Up Bar
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield.checkerboard")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(accentBlue)
+                        Text("Claude Reviewer")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(textWhite)
+                        Spacer()
+                        if watcher.stats.claudeNeedsTopup == true {
+                            Text("TOP-UP")
+                                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                .foregroundColor(accentRed)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(accentRed.opacity(0.20))
+                                .clipShape(Capsule())
+                        }
+                        Text(watcher.stats.formattedClaudeBalance)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(watcher.stats.claudeNeedsTopup == true ? accentRed : accentGreen)
+                        Text("(Today: \(watcher.stats.formattedClaudeTodaySpend))")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(textMuted)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(bgCard.opacity(0.68))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.8)
+                    )
                 }
             }
             .padding(12)

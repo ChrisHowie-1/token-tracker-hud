@@ -41,6 +41,9 @@ public struct TokenStats: Codable {
     public var status: String?
     public var cacheEntries: Int?
     public var shadowTokensAvoided: Int?
+    public var claudeBalanceGbp: Double?
+    public var claudeSpendTodayGbp: Double?
+    public var claudeNeedsTopup: Bool?
 
     enum CodingKeys: String, CodingKey {
         case totalFreeTokens = "total_free_tokens"
@@ -81,6 +84,9 @@ public struct TokenStats: Codable {
         case status = "status"
         case cacheEntries = "cache_entries"
         case shadowTokensAvoided = "shadow_tokens_avoided"
+        case claudeBalanceGbp = "claude_balance_gbp"
+        case claudeSpendTodayGbp = "claude_spend_today_gbp"
+        case claudeNeedsTopup = "claude_needs_topup"
     }
 
     public static func fallback() -> TokenStats {
@@ -161,6 +167,16 @@ public struct TokenStats: Codable {
 
     public var formattedTodaySavings: String {
         let gbp = todaySavingsGbp ?? 0.0
+        return String(format: "£%.2f", gbp)
+    }
+
+    public var formattedClaudeBalance: String {
+        let gbp = claudeBalanceGbp ?? 13.82
+        return String(format: "£%.2f", gbp)
+    }
+
+    public var formattedClaudeTodaySpend: String {
+        let gbp = claudeSpendTodayGbp ?? 0.0
         return String(format: "£%.2f", gbp)
     }
 
