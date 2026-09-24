@@ -120,7 +120,9 @@ public struct FloatingHUDView: View {
                 liquidGlassCard(
                     title: "Weekly Limit Remaining",
                     countdownText: "Refreshes in \(watcher.weeklyCountdown)",
-                    percentage: watcher.stats.calculatedWeeklyRemainingPct
+                    percentage: watcher.stats.calculatedWeeklyRemainingPct,
+                    limitTag: "(7)",
+                    isLowest: !watcher.stats.isFiveHourLower
                 )
 
                 if !watcher.isCompact {
@@ -128,7 +130,9 @@ public struct FloatingHUDView: View {
                     liquidGlassCard(
                         title: "Five Hour Limit Remaining",
                         countdownText: "Refreshes in \(watcher.fiveHourCountdown)",
-                        percentage: watcher.stats.calculated5hRemainingPct
+                        percentage: watcher.stats.calculated5hRemainingPct,
+                        limitTag: "(5)",
+                        isLowest: watcher.stats.isFiveHourLower
                     )
                 }
             }
@@ -181,13 +185,20 @@ public struct FloatingHUDView: View {
     }
 
     @ViewBuilder
-    private func liquidGlassCard(title: String, countdownText: String, percentage: Double) -> some View {
+    private func liquidGlassCard(title: String, countdownText: String, percentage: Double, limitTag: String = "", isLowest: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(textWhite)
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(textWhite)
+                        if !limitTag.isEmpty {
+                            Text(limitTag)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(remainingColor(percentage))
+                        }
+                    }
                     Text(countdownText)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundColor(textLight)
@@ -275,7 +286,11 @@ public struct FloatingHUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        stops: [
+                        stops: isLowest ? [
+                            .init(color: remainingColor(percentage).opacity(0.65), location: 0.0),
+                            .init(color: remainingColor(percentage).opacity(0.25), location: 0.5),
+                            .init(color: remainingColor(percentage).opacity(0.12), location: 1.0)
+                        ] : [
                             .init(color: Color.white.opacity(0.32), location: 0.0),
                             .init(color: Color.white.opacity(0.10), location: 0.4),
                             .init(color: Color.white.opacity(0.04), location: 1.0)
@@ -283,7 +298,7 @@ public struct FloatingHUDView: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: isLowest ? 1.4 : 1
                 )
         )
         .shadow(color: Color.black.opacity(0.25), radius: 4, x: 0, y: 2)

@@ -133,10 +133,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.$stats
             .receive(on: DispatchQueue.main)
             .sink { [weak self] stats in
-                let remaining = stats.calculated5hRemainingPct
-                let pctStr = String(format: "%.0f%%", remaining)
+                let lowest = stats.lowestRemainingPct
+                let tag = stats.lowestTag
+                let pctStr = String(format: "%.0f%%", lowest)
                 let icon = stats.isBusy == true ? "⚡️" : "🟢"
-                self?.statusItem.button?.title = "\(icon) \(pctStr)"
+                self?.statusItem.button?.title = "\(icon) \(pctStr) \(tag)"
+                self?.statusItem.button?.toolTip = "Gemini Quota Tracker\n5h: \(String(format: "%.0f%%", stats.calculated5hRemainingPct))\n7d: \(String(format: "%.0f%%", stats.calculatedWeeklyRemainingPct))\nShowing lowest: \(tag)"
             }
             .store(in: &cancellables)
 

@@ -142,6 +142,18 @@ public struct TokenStats: Codable {
         return max(0.0, min(100.0, 100.0 - used))
     }
 
+    public var isFiveHourLower: Bool {
+        return calculated5hRemainingPct <= calculatedWeeklyRemainingPct
+    }
+
+    public var lowestRemainingPct: Double {
+        return isFiveHourLower ? calculated5hRemainingPct : calculatedWeeklyRemainingPct
+    }
+
+    public var lowestTag: String {
+        return isFiveHourLower ? "(5)" : "(7)"
+    }
+
     public var formattedSavings: String {
         let gbp = totalSavingsGbp ?? 0.0
         return String(format: "£%.2f", gbp)
