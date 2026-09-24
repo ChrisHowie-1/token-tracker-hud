@@ -138,12 +138,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.$stats
             .receive(on: DispatchQueue.main)
             .sink { [weak self] stats in
-                let lowest = stats.lowestRemainingPct
-                let tag = stats.lowestTag
-                let pctStr = String(format: "%.0f%%", lowest)
-                let icon = stats.isBusy == true ? "⚡️" : "🟢"
-                self?.statusItem.button?.title = "\(icon) \(pctStr) \(tag)"
-                self?.statusItem.button?.toolTip = "Gemini Quota Tracker\n5h: \(String(format: "%.0f%%", stats.calculated5hRemainingPct))\n7d: \(String(format: "%.0f%%", stats.calculatedWeeklyRemainingPct))\nShowing lowest: \(tag)"
+                self?.updateStatusButton(stats: stats)
             }
             .store(in: &cancellables)
 
@@ -165,6 +160,41 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.animateWindowResize(isCompact: isCompact)
             }
             .store(in: &cancellables)
+    }
+
+    private func updateStatusButton(stats: TokenStats) {
+        guard let button = statusItem.button else { return }
+
+        let lowest = stats.lowestRemainingPct
+        let tag = stats.lowestTag
+        let pctStr = String(format: "%.0f%%", lowest)
+        let icon = stats.isBusy == true ? "⚡️" : "🟢"
+
+        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let boldFont = NSFont.systemFont(ofSize: 13, weight: .bold)
+
+        let attrTitle = NSMutableAttributedString()
+        attrTitle.append(NSAttributedString(string: "\(icon) \(pctStr) ", attributes: [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]))
+        attrTitle.append(NSAttributedString(string: tag, attributes: [
+            .font: boldFont,
+            .foregroundColor: statusColor(for: lowest)
+        ]))
+
+        button.attributedTitle = attrTitle
+        button.toolTip = "Gemini Quota Tracker\n5h: \(String(format: "%.0f%%", stats.calculated5hRemainingPct))\n7d: \(String(format: "%.0f%%", stats.calculatedWeeklyRemainingPct))\nShowing lowest: \(tag)"
+    }
+
+    private func statusColor(for pct: Double) -> NSColor {
+        if pct >= 50.0 {
+            return NSColor(red: 0.22, green: 0.88, blue: 0.45, alpha: 1.0)
+        } else if pct >= 20.0 {
+            return NSColor(red: 1.0, green: 0.58, blue: 0.20, alpha: 1.0)
+        } else {
+            return NSColor(red: 1.0, green: 0.30, blue: 0.30, alpha: 1.0)
+        }
     }
 
     private func animateWindowResize(isCompact: Bool) {
