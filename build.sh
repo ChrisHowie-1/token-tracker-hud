@@ -52,3 +52,7 @@ if [ -d "/Applications/$APP_NAME.app" ]; then
 fi
 
 echo "Build complete: $APP_BUNDLE"
+
+if [ -f "$DIR/deploy_omarchy.sh" ]; then
+    "$DIR/deploy_omarchy.sh" || true
+fi
