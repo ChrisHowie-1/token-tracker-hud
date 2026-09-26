@@ -18,10 +18,6 @@ Panel {
   property real weeklyRemainingPct: statsData && statsData.weekly_remaining_pct !== undefined ? statsData.weekly_remaining_pct : 98.0
   property real fiveHourRemainingPct: statsData && statsData.five_hour_remaining_pct !== undefined ? statsData.five_hour_remaining_pct : 81.0
 
-  property real claudeBalanceGbp: statsData && statsData.claude_balance_gbp !== undefined ? statsData.claude_balance_gbp : 13.82
-  property real claudeSpendTodayGbp: statsData && statsData.claude_spend_today_gbp !== undefined ? statsData.claude_spend_today_gbp : 0.0
-  property bool claudeNeedsTopup: statsData && statsData.claude_needs_topup === true
-
   readonly property bool isFiveHourLower: fiveHourRemainingPct <= weeklyRemainingPct
   readonly property real lowestPct: isFiveHourLower ? fiveHourRemainingPct : weeklyRemainingPct
   readonly property string lowestTag: isFiveHourLower ? "(5)" : "(7)"
@@ -170,68 +166,6 @@ Panel {
         limitTag: "(7)"
       }
 
-      // Claude Reviewer Balance Bar
-      Rectangle {
-        width: parent.width
-        implicitHeight: Style.space(34)
-        radius: Style.space(8)
-        color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.06)
-        border.color: root.claudeNeedsTopup ? root.accentRed : Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.12)
-        border.width: 1
-
-        RowLayout {
-          anchors.fill: parent
-          anchors.leftMargin: Style.space(10)
-          anchors.rightMargin: Style.space(10)
-
-          Text {
-            text: "Claude Reviewer"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            Layout.alignment: Qt.AlignVCenter
-          }
-
-          Item { Layout.fillWidth: true }
-
-          Rectangle {
-            visible: root.claudeNeedsTopup
-            width: topupText.implicitWidth + 8
-            height: 16
-            radius: 4
-            color: Qt.rgba(root.accentRed.r, root.accentRed.g, root.accentRed.b, 0.25)
-            Layout.alignment: Qt.AlignVCenter
-
-            Text {
-              id: topupText
-              anchors.centerIn: parent
-              text: "TOP-UP"
-              color: root.accentRed
-              font.family: root.bar.fontFamily
-              font.pixelSize: 9
-              font.bold: true
-            }
-          }
-
-          Text {
-            text: "£" + root.claudeBalanceGbp.toFixed(2)
-            color: root.claudeNeedsTopup ? root.accentRed : root.accentGreen
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            Layout.alignment: Qt.AlignVCenter
-          }
-
-          Text {
-            text: "(Today: £" + root.claudeSpendTodayGbp.toFixed(2) + ")"
-            color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: 10
-            Layout.alignment: Qt.AlignVCenter
-          }
-        }
-      }
     }
   }
 

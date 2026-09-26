@@ -22,7 +22,7 @@ PanelWindow {
   }
 
   implicitWidth: 360
-  implicitHeight: isCompact ? 165 : 315
+  implicitHeight: isCompact ? 165 : 268
 
   color: "transparent"
 
@@ -30,10 +30,6 @@ PanelWindow {
   property string serverUrl: "http://192.168.32.90:9587/stats"
   property bool isCompact: false
   property bool isLockedOrScreensaver: false
-
-  property real claudeBalanceGbp: statsData && statsData.claude_balance_gbp !== undefined ? statsData.claude_balance_gbp : 13.82
-  property real claudeSpendTodayGbp: statsData && statsData.claude_spend_today_gbp !== undefined ? statsData.claude_spend_today_gbp : 0.0
-  property bool claudeNeedsTopup: statsData && statsData.claude_needs_topup === true
 
   // Status indicator dot
   property bool isBusy: statsData && statsData.is_busy === true
@@ -231,65 +227,6 @@ PanelWindow {
         cardColor: hud.getCardColor(hud.fiveHourRemainingPct)
       }
 
-      // --- Claude Reviewer Balance Bar ---
-      Rectangle {
-        width: parent.width
-        visible: !hud.isCompact
-        implicitHeight: 34
-        radius: 10
-        color: Qt.rgba(1, 1, 1, 0.06)
-        border.color: hud.claudeNeedsTopup ? hud.accentRed : Qt.rgba(1, 1, 1, 0.12)
-        border.width: 1
-
-        RowLayout {
-          anchors.fill: parent
-          anchors.leftMargin: 12
-          anchors.rightMargin: 12
-
-          Text {
-            text: "Claude Reviewer"
-            color: "white"
-            font.pixelSize: 11
-            font.bold: true
-            Layout.alignment: Qt.AlignVCenter
-          }
-
-          Item { Layout.fillWidth: true }
-
-          Rectangle {
-            visible: hud.claudeNeedsTopup
-            width: topupText.implicitWidth + 8
-            height: 16
-            radius: 4
-            color: Qt.rgba(hud.accentRed.r, hud.accentRed.g, hud.accentRed.b, 0.25)
-            Layout.alignment: Qt.AlignVCenter
-
-            Text {
-              id: topupText
-              anchors.centerIn: parent
-              text: "TOP-UP"
-              color: hud.accentRed
-              font.pixelSize: 9
-              font.bold: true
-            }
-          }
-
-          Text {
-            text: "£" + hud.claudeBalanceGbp.toFixed(2)
-            color: hud.claudeNeedsTopup ? hud.accentRed : hud.accentGreen
-            font.pixelSize: 11
-            font.bold: true
-            Layout.alignment: Qt.AlignVCenter
-          }
-
-          Text {
-            text: "(Today: £" + hud.claudeSpendTodayGbp.toFixed(2) + ")"
-            color: Qt.rgba(1, 1, 1, 0.6)
-            font.pixelSize: 10
-            Layout.alignment: Qt.AlignVCenter
-          }
-        }
-      }
     }
   }
 
