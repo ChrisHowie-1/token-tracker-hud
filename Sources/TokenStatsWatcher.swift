@@ -54,8 +54,6 @@ public class TokenStatsWatcher: ObservableObject {
             if fileManager.fileExists(atPath: primaryStatsPath),
                let data = try? Data(contentsOf: URL(fileURLWithPath: primaryStatsPath)) {
                 if decodeData(data) {
-                    // Keep iCloud copy fresh atomically from Mac Studio
-                    try? data.write(to: URL(fileURLWithPath: icloudStatsPath), options: .atomic)
                     return
                 }
             }

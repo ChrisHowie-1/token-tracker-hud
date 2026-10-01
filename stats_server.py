@@ -19,7 +19,6 @@ import ssl
 import datetime
 
 SOURCE_STATS = "/Users/chrishowie/.gemini/antigravity/local_ai_stats.json"
-ICLOUD_STATS = "/Users/chrishowie/Library/Mobile Documents/com~apple~CloudDocs/Antigravity Projects/Misc/TokenTrackerHUD/stats.json"
 PORT = 9587
 
 def fetch_official_quota():
@@ -121,9 +120,6 @@ def sync_loop():
                     json.dump(d, f, indent=2)
                 os.replace(tmp_path, SOURCE_STATS)
 
-                # Sync to iCloud Drive
-                os.makedirs(os.path.dirname(ICLOUD_STATS), exist_ok=True)
-                shutil.copy2(SOURCE_STATS, ICLOUD_STATS)
         except Exception:
             pass
         time.sleep(2.0)
