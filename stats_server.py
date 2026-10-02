@@ -17,6 +17,7 @@ import re
 import urllib.request
 import ssl
 import datetime
+import fcntl
 
 SOURCE_STATS = "/Users/chrishowie/.gemini/antigravity/local_ai_stats.json"
 PORT = 9587
@@ -70,15 +71,10 @@ def sync_loop():
     while True:
         try:
             official = fetch_official_quota()
-            d = {}
-            if os.path.exists(SOURCE_STATS):
-                try:
-                    with open(SOURCE_STATS, "r") as f:
-                        d = json.load(f)
-                except Exception:
-                    pass
-
             if official:
+                quota_updates = {
+                    'official_sync_status': 'LIVE_RPC_SYNC'
+                }
                 groups = official.get('response', {}).get('groups', [])
                 for g in groups:
                     if g.get('displayName') == 'Gemini Models':
@@ -101,25 +97,36 @@ def sync_loop():
                                 countdown_str = desc.split('refresh in ')[-1].rstrip('.')
 
                             if b.get('bucketId') == 'gemini-5h':
-                                d['five_hour_remaining_pct'] = float(pct)
-                                d['five_hour_refresh_time'] = countdown_str
+                                quota_updates['five_hour_remaining_pct'] = float(pct)
+                                quota_updates['five_hour_refresh_time'] = countdown_str
                                 if reset_ts:
-                                    d['five_hour_reset_timestamp'] = reset_ts
+                                    quota_updates['five_hour_reset_timestamp'] = reset_ts
                             elif b.get('bucketId') == 'gemini-weekly':
-                                d['weekly_remaining_pct'] = float(pct)
-                                d['weekly_refresh_time'] = countdown_str
+                                quota_updates['weekly_remaining_pct'] = float(pct)
+                                quota_updates['weekly_refresh_time'] = countdown_str
                                 if reset_ts:
-                                    d['weekly_reset_timestamp'] = reset_ts
+                                    quota_updates['weekly_reset_timestamp'] = reset_ts
 
-                d['official_sync_status'] = 'LIVE_RPC_SYNC'
-                d['last_updated'] = time.time()
-
-                # Write to local_ai_stats.json atomically
-                tmp_path = SOURCE_STATS + ".tmp"
-                with open(tmp_path, "w") as f:
-                    json.dump(d, f, indent=2)
-                os.replace(tmp_path, SOURCE_STATS)
-
+                # Atomically update SOURCE_STATS under lock without clobbering live fields
+                lock_file = SOURCE_STATS + ".lock"
+                try:
+                    with open(lock_file, "w") as lock_f:
+                        fcntl.flock(lock_f, fcntl.LOCK_EX)
+                        try:
+                            live_data = {}
+                            if os.path.exists(SOURCE_STATS):
+                                with open(SOURCE_STATS, "r") as f:
+                                    live_data = json.load(f)
+                            live_data.update(quota_updates)
+                            live_data['last_updated'] = time.time()
+                            tmp_path = SOURCE_STATS + ".tmp"
+                            with open(tmp_path, "w") as f:
+                                json.dump(live_data, f, indent=2)
+                            os.replace(tmp_path, SOURCE_STATS)
+                        finally:
+                            fcntl.flock(lock_f, fcntl.LOCK_UN)
+                except Exception:
+                    pass
         except Exception:
             pass
         time.sleep(2.0)
