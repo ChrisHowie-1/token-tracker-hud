@@ -5,8 +5,7 @@ public struct WindowDragView: NSViewRepresentable {
     public init() {}
 
     public func makeNSView(context: Context) -> DragAreaNSView {
-        let view = DragAreaNSView()
-        return view
+        return DragAreaNSView()
     }
 
     public func updateNSView(_ nsView: DragAreaNSView, context: Context) {}
@@ -29,7 +28,7 @@ public struct FloatingHUDView: View {
         self.watcher = watcher
     }
 
-    // High Contrast Palette (Preserved Theme)
+    // High Contrast Liquid Glass Palette
     private let bgMain = Color(red: 0.10, green: 0.10, blue: 0.12)
     private let bgCard = Color(red: 0.16, green: 0.16, blue: 0.19)
 
@@ -43,18 +42,23 @@ public struct FloatingHUDView: View {
     private let accentOrange = Color(red: 1.0, green: 0.58, blue: 0.20)
     private let accentRed = Color(red: 1.0, green: 0.30, blue: 0.30)
 
+    private var headerStatusColor: Color {
+        if watcher.isOffline { return textMuted }
+        return watcher.stats.isBusy == true ? accentGreen : accentBlue
+    }
+
     public var body: some View {
+        let lowest = watcher.stats.lowestBucket
+
         ZStack {
-            // Full background drag handler
             WindowDragView()
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 9) {
                 // Header Bar
                 HStack(spacing: 8) {
-                    let statusColor = (watcher.stats.isBusy == true ? accentGreen : accentBlue)
                     ZStack {
                         Circle()
-                            .fill(statusColor)
+                            .fill(headerStatusColor)
                             .frame(width: 9, height: 9)
                             .overlay(
                                 Circle()
@@ -67,10 +71,10 @@ public struct FloatingHUDView: View {
                                     )
                             )
                     }
-                    .shadow(color: statusColor.opacity(0.85), radius: 5, x: 0, y: 0)
-                    .shadow(color: statusColor.opacity(0.40), radius: 10, x: 0, y: 0)
+                    .shadow(color: headerStatusColor.opacity(0.85), radius: 5, x: 0, y: 0)
+                    .shadow(color: headerStatusColor.opacity(0.40), radius: 10, x: 0, y: 0)
 
-                    Text("Gemini Quota Tracker")
+                    Text(watcher.isOffline ? "AI Quota Tracker (Offline)" : "AI Quota Tracker")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(textWhite)
 
@@ -96,7 +100,7 @@ public struct FloatingHUDView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .onHover { isHoveringCompact = $0 }
-                    .help("Toggle compact mode")
+                    .help("Toggle compact mode (surfaces lowest pool)")
 
                     // Close Button
                     Button(action: {
@@ -113,44 +117,57 @@ public struct FloatingHUDView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .onHover { isHoveringClose = $0 }
-                    .help("Hide HUD (accessible via Menu Bar)")
+                    .help("Hide HUD (left-click Menu Bar to restore)")
                 }
 
-                // 1. Weekly Limit Remaining Card (ON TOP)
-                liquidGlassCard(
-                    title: "Weekly Limit Remaining",
-                    countdownText: "Refreshes in \(watcher.weeklyCountdown)",
-                    percentage: watcher.stats.calculatedWeeklyRemainingPct,
-                    limitTag: "(7)",
-                    isLowest: !watcher.stats.isFiveHourLower
-                )
-
-                if !watcher.isCompact {
-                    // 2. Five Hour Limit Remaining Card (SECOND)
+                if watcher.isCompact {
+                    // Compact Mode: Automatically displays whichever bucket has the lowest remaining quota
                     liquidGlassCard(
-                        title: "Five Hour Limit Remaining",
+                        title: lowest.title,
+                        countdownText: "Refreshes in \(watcher.countdownForBucket(kind: lowest.kind))",
+                        percentage: lowest.percentage,
+                        limitTag: lowest.tag,
+                        isLowest: true
+                    )
+                } else {
+                    // 1. Gemini Weekly Card
+                    liquidGlassCard(
+                        title: "Gemini Weekly",
+                        countdownText: "Refreshes in \(watcher.weeklyCountdown)",
+                        percentage: watcher.stats.calculatedWeeklyRemainingPct,
+                        limitTag: "(G7)",
+                        isLowest: lowest.kind == "G7"
+                    )
+
+                    // 2. Gemini 5-Hour Card
+                    liquidGlassCard(
+                        title: "Gemini 5-Hour",
                         countdownText: "Refreshes in \(watcher.fiveHourCountdown)",
                         percentage: watcher.stats.calculated5hRemainingPct,
-                        limitTag: "(5)",
-                        isLowest: watcher.stats.isFiveHourLower
+                        limitTag: "(G5)",
+                        isLowest: lowest.kind == "G5"
                     )
+
+                    // 3. Claude & GPT Dual-Pool Card (when reported by Antigravity RPC)
+                    if watcher.stats.hasThreePQuota {
+                        dualThreePCard(lowestKind: lowest.kind)
+                    }
                 }
+
+                // 4. M3 Ultra Live Savings & Throughput Strip
+                m3UltraFooterStrip()
             }
             .padding(12)
         }
-        .frame(width: 330)
-        // Liquid Glass Background
+        .frame(width: 336)
         .background(
             ZStack {
-                // Native continuous frosted glass
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.ultraThinMaterial)
 
-                // Deep dark tint preserving contrast across wallpapers
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(bgMain.opacity(0.82))
+                    .fill(bgMain.opacity(0.84))
 
-                // Liquid glass surface sheen
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(
                         LinearGradient(
@@ -166,7 +183,6 @@ public struct FloatingHUDView: View {
             }
         )
         .overlay(
-            // Liquid glass specular rim highlight
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(
                     LinearGradient(
@@ -185,8 +201,101 @@ public struct FloatingHUDView: View {
     }
 
     @ViewBuilder
+    private func dualThreePCard(lowestKind: String) -> some View {
+        let p5 = watcher.stats.calculated3p5hRemainingPct
+        let p7 = watcher.stats.calculated3pWeeklyRemainingPct
+        let isAnyLowest = (lowestKind == "C5" || lowestKind == "C7")
+        let borderAccent = remainingColor(min(p5, p7))
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                miniPoolColumn(
+                    label: "Claude/GPT 5h",
+                    tag: "(C5)",
+                    countdown: watcher.threePFiveHourCountdown,
+                    pct: p5
+                )
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.10))
+                    .frame(width: 1, height: 42)
+
+                miniPoolColumn(
+                    label: "Claude/GPT 7d",
+                    tag: "(C7)",
+                    countdown: watcher.threePWeeklyCountdown,
+                    pct: p7
+                )
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(bgCard.opacity(0.68))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(
+                    isAnyLowest ? borderAccent.opacity(0.55) : Color.white.opacity(0.16),
+                    lineWidth: isAnyLowest ? 1.4 : 1.0
+                )
+        )
+        .shadow(color: Color.black.opacity(0.22), radius: 4, x: 0, y: 2)
+    }
+
+    @ViewBuilder
+    private func miniPoolColumn(label: String, tag: String, countdown: String, pct: Double) -> some View {
+        let col = remainingColor(pct)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(label)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(textWhite)
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Text(String(format: "%.0f%%", pct))
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(col)
+            }
+            Text("\(tag) · \(countdown)")
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundColor(textMuted)
+                .lineLimit(1)
+
+            liquidTube(percentage: pct, height: 6)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func m3UltraFooterStrip() -> some View {
+        let isBusy = watcher.stats.isBusy == true
+        HStack(spacing: 6) {
+            Text(isBusy ? "⚡️" : "🖥")
+                .font(.system(size: 11))
+            Text(isBusy ? "M3 Ultra Active" : "M3 Ultra")
+                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                .foregroundColor(isBusy ? accentGreen : textLight)
+            Spacer()
+            Text("\(watcher.stats.formattedSavings) saved · \(watcher.stats.formattedFreeTokens) tok · \(watcher.stats.formattedSpeed)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(isBusy ? accentGreen : accentBlue)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(isBusy ? accentGreen.opacity(0.14) : Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(isBusy ? accentGreen.opacity(0.45) : Color.white.opacity(0.10), lineWidth: 0.8)
+        )
+    }
+
+    @ViewBuilder
     private func liquidGlassCard(title: String, countdownText: String, percentage: Double, limitTag: String = "", isLowest: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -205,71 +314,17 @@ public struct FloatingHUDView: View {
                 }
                 Spacer()
                 Text(String(format: "%.0f%%", percentage))
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .font(.system(size: 21, weight: .heavy, design: .rounded))
                     .foregroundColor(remainingColor(percentage))
                     .shadow(color: remainingColor(percentage).opacity(0.40), radius: 6, x: 0, y: 0)
             }
 
-            // Liquid Glass Progress Bar Tube
-            GeometryReader { geo in
-                let fillWidth = max(7, geo.size.width * CGFloat(min(1.0, percentage / 100.0)))
-                let color = remainingColor(percentage)
-
-                ZStack(alignment: .leading) {
-                    // Recessed cylindrical glass tube
-                    Capsule()
-                        .fill(Color.black.opacity(0.55))
-                        .frame(height: 8)
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-                        )
-
-                    // Luminous liquid fill inside tube
-                    ZStack(alignment: .topLeading) {
-                        // Liquid base gradient
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        color.opacity(0.95),
-                                        color
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-
-                        // Liquid glass specular gloss line
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.52),
-                                        Color.white.opacity(0.0)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .frame(height: 3.5)
-                            .padding(.horizontal, 1)
-                    }
-                    .frame(width: fillWidth, height: 8)
-                    .clipShape(Capsule())
-                    // Liquid glow aura
-                    .shadow(color: color.opacity(0.65), radius: 5, x: 0, y: 0)
-                    .shadow(color: color.opacity(0.35), radius: 10, x: 0, y: 0)
-                }
-            }
-            .frame(height: 8)
+            liquidTube(percentage: percentage, height: 8)
         }
-        .padding(11)
-        // Card frosted glass container with concentric corner radius (12pt)
+        .padding(10)
         .background(
             ZStack {
                 bgCard.opacity(0.68)
-
                 LinearGradient(
                     stops: [
                         .init(color: Color.white.opacity(0.08), location: 0.0),
@@ -302,6 +357,50 @@ public struct FloatingHUDView: View {
                 )
         )
         .shadow(color: Color.black.opacity(0.25), radius: 4, x: 0, y: 2)
+    }
+
+    @ViewBuilder
+    private func liquidTube(percentage: Double, height: CGFloat) -> some View {
+        GeometryReader { geo in
+            let fillWidth = max(height, geo.size.width * CGFloat(min(1.0, max(0.0, percentage) / 100.0)))
+            let color = remainingColor(percentage)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.black.opacity(0.55))
+                    .frame(height: height)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                    )
+
+                ZStack(alignment: .topLeading) {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.95), color],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.52), Color.white.opacity(0.0)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(height: height * 0.44)
+                        .padding(.horizontal, 1)
+                }
+                .frame(width: fillWidth, height: height)
+                .clipShape(Capsule())
+                .shadow(color: color.opacity(0.55), radius: 4, x: 0, y: 0)
+            }
+        }
+        .frame(height: height)
     }
 
     private func remainingColor(_ pct: Double) -> Color {

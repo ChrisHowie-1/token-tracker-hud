@@ -9,14 +9,18 @@ public class TokenStatsWatcher: ObservableObject {
     @Published public var lastRefreshed: Date = Date()
     @Published public var isHUDVisible: Bool = true
     @Published public var isCompact: Bool = false
-    @Published public var fiveHourCountdown: String = "3 hours, 23 minutes"
-    @Published public var weeklyCountdown: String = "6 days, 14 hours"
+    @Published public var isOffline: Bool = false
+
+    @Published public var fiveHourCountdown: String = "Calculating..."
+    @Published public var weeklyCountdown: String = "Calculating..."
+    @Published public var threePFiveHourCountdown: String = "Calculating..."
+    @Published public var threePWeeklyCountdown: String = "Calculating..."
 
     private var timer: Timer?
     private var consecutiveLanFailures: Int = 0
+    private var isFetchingLan: Bool = false
 
     private let primaryStatsPath = "/Users/chrishowie/.gemini/antigravity/local_ai_stats.json"
-    private let icloudStatsPath = ("/Users/chrishowie/Library/Mobile Documents/com~apple~CloudDocs/Antigravity Projects/Misc/TokenTrackerHUD/stats.json" as NSString).expandingTildeInPath
     private let lanStatsURL = URL(string: "http://192.168.32.90:9587/stats")!
 
     private let isLocalHost: Bool = {
@@ -25,8 +29,8 @@ public class TokenStatsWatcher: ObservableObject {
     }()
 
     private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 2.5
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2.0
         config.timeoutIntervalForResource = 2.5
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         return URLSession(configuration: config)
@@ -39,7 +43,6 @@ public class TokenStatsWatcher: ObservableObject {
 
     public func startWatching() {
         timer?.invalidate()
-        // Poll every 1.5 seconds for fresh stats
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.loadStats()
             self?.updateCountdowns()
@@ -49,38 +52,46 @@ public class TokenStatsWatcher: ObservableObject {
     public func loadStats() {
         let fileManager = FileManager.default
 
-        // 1. If running locally on Mac Studio, read primary path directly
+        // 1. If running on Mac Studio, read primary local file directly
         if isLocalHost {
             if fileManager.fileExists(atPath: primaryStatsPath),
                let data = try? Data(contentsOf: URL(fileURLWithPath: primaryStatsPath)) {
                 if decodeData(data) {
+                    DispatchQueue.main.async {
+                        if self.isOffline { self.isOffline = false }
+                    }
                     return
                 }
             }
         }
 
-        // 2. Client mode (MacBook): fetch live stream from Mac Studio LAN daemon
+        // 2. Client mode (MacBook Pro): fetch live stream from Mac Studio LAN daemon with in-flight guard
+        guard !isFetchingLan else { return }
+        isFetchingLan = true
+
         var request = URLRequest(url: lanStatsURL)
-        request.timeoutInterval = 2.5
+        request.timeoutInterval = 2.0
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
 
         session.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
+            self.isFetchingLan = false
 
             if let data = data, error == nil, let http = response as? HTTPURLResponse, http.statusCode == 200 {
                 if self.decodeData(data) {
                     self.consecutiveLanFailures = 0
+                    DispatchQueue.main.async {
+                        if self.isOffline { self.isOffline = false }
+                    }
                     return
                 }
             }
 
             self.consecutiveLanFailures += 1
-
-            // 3. Fallback to iCloud file ONLY if LAN is genuinely down (3+ failures) or initial launch
-            if (self.consecutiveLanFailures >= 3 || self.stats.totalRequests == 0),
-               fileManager.fileExists(atPath: self.icloudStatsPath),
-               let fileData = try? Data(contentsOf: URL(fileURLWithPath: self.icloudStatsPath)) {
-                _ = self.decodeData(fileData)
+            if self.consecutiveLanFailures >= 3 {
+                DispatchQueue.main.async {
+                    if !self.isOffline { self.isOffline = true }
+                }
             }
         }.resume()
     }
@@ -91,13 +102,12 @@ public class TokenStatsWatcher: ObservableObject {
             let decoder = JSONDecoder()
             let decoded = try decoder.decode(TokenStats.self, from: data)
 
-            // Monotonicity guard: never overwrite fresher live data with older/stale payload
+            // Monotonicity guard: never overwrite fresher live data with older payload
             if !allowOlder,
                let incomingTime = decoded.lastUpdated,
                let currentTime = self.stats.lastUpdated,
-               self.stats.totalRequests != 0 {
+               currentTime > 0 {
                 if incomingTime < (currentTime - 2.0) {
-                    // Stale fallback payload rejected
                     return false
                 }
             }
@@ -105,6 +115,7 @@ public class TokenStatsWatcher: ObservableObject {
             DispatchQueue.main.async {
                 self.stats = decoded
                 self.lastRefreshed = Date()
+                self.updateCountdowns(with: decoded)
             }
             return true
         } catch {
@@ -112,35 +123,56 @@ public class TokenStatsWatcher: ObservableObject {
         }
     }
 
-    private func updateCountdowns() {
+    private static func format5h(target: Double?, fallback: String?, now: Double) -> String {
+        if let t = target, t > now {
+            let rem = t - now
+            let hours = Int(rem) / 3600
+            let mins = (Int(rem) % 3600) / 60
+            return "\(hours)h \(mins)m"
+        }
+        return fallback ?? "Ready"
+    }
+
+    private static func formatWeekly(target: Double?, fallback: String?, now: Double) -> String {
+        if let t = target, t > now {
+            let rem = t - now
+            let days = Int(rem) / 86400
+            let hours = Int(round((rem.truncatingRemainder(dividingBy: 86400)) / 3600.0))
+            return "\(days)d \(hours)h"
+        }
+        return fallback ?? "Ready"
+    }
+
+    private func updateCountdowns(with source: TokenStats? = nil) {
+        let s = source ?? stats
         let now = Date().timeIntervalSince1970
 
-        // 5-Hour Countdown
-        if let target5h = stats.fiveHourResetTimestamp, target5h > now {
-            let remaining = target5h - now
-            let hours = Int(remaining) / 3600
-            let minutes = (Int(remaining) % 3600) / 60
-            DispatchQueue.main.async {
-                self.fiveHourCountdown = "\(hours) hours, \(minutes) minutes"
-            }
-        } else if let explicit5h = stats.fiveHourRefreshTime {
-            DispatchQueue.main.async {
-                self.fiveHourCountdown = explicit5h
-            }
+        let g5 = Self.format5h(target: s.fiveHourResetTimestamp, fallback: s.fiveHourRefreshTime, now: now)
+        let g7 = Self.formatWeekly(target: s.weeklyResetTimestamp, fallback: s.weeklyRefreshTime, now: now)
+        let c5 = Self.format5h(target: s.threePFiveHourResetTimestamp, fallback: s.threePFiveHourRefreshTime, now: now)
+        let c7 = Self.formatWeekly(target: s.threePWeeklyResetTimestamp, fallback: s.threePWeeklyRefreshTime, now: now)
+
+        let apply = {
+            if self.fiveHourCountdown != g5 { self.fiveHourCountdown = g5 }
+            if self.weeklyCountdown != g7 { self.weeklyCountdown = g7 }
+            if self.threePFiveHourCountdown != c5 { self.threePFiveHourCountdown = c5 }
+            if self.threePWeeklyCountdown != c7 { self.threePWeeklyCountdown = c7 }
         }
 
-        // Weekly Countdown
-        if let targetWk = stats.weeklyResetTimestamp, targetWk > now {
-            let remaining = targetWk - now
-            let days = Int(remaining) / 86400
-            let hours = Int(round((remaining.truncatingRemainder(dividingBy: 86400)) / 3600.0))
-            DispatchQueue.main.async {
-                self.weeklyCountdown = "\(days) days, \(hours) hours"
-            }
-        } else if let explicitWk = stats.weeklyRefreshTime {
-            DispatchQueue.main.async {
-                self.weeklyCountdown = explicitWk
-            }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    public func countdownForBucket(kind: String) -> String {
+        switch kind {
+        case "G7": return weeklyCountdown
+        case "G5": return fiveHourCountdown
+        case "C5": return threePFiveHourCountdown
+        case "C7": return threePWeeklyCountdown
+        default: return fiveHourCountdown
         }
     }
 

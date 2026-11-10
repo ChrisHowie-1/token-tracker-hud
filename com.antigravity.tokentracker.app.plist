@@ -6,9 +6,7 @@
     <string>com.antigravity.tokentracker.app</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/open</string>
-        <string>-a</string>
-        <string>/Users/chrishowie/Library/Mobile Documents/com~apple~CloudDocs/Antigravity Projects/Misc/TokenTrackerHUD/build/TokenTrackerHUD.app</string>
+        <string>/Applications/TokenTrackerHUD.app/Contents/MacOS/TokenTrackerHUD</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

@@ -5,13 +5,16 @@ import ServiceManagement
 
 public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    private var contextMenu: NSMenu!
     private var hudWindow: FloatingHUDWindow?
     private var watcher = TokenStatsWatcher.shared
     private var cancellables = Set<AnyCancellable>()
 
-    private let hudWidth: CGFloat = 330
-    private let compactHeight: CGFloat = 118
-    private let expandedHeight: CGFloat = 196
+    private let hudWidth: CGFloat = 336
+    private let compactHeight: CGFloat = 158
+    private let expandedBaseHeight: CGFloat = 236
+    private let expandedFullHeight: CGFloat = 314
+    private var lastAppliedHeight: CGFloat = 0
 
     private var launchAtLoginItem: NSMenuItem?
 
@@ -21,6 +24,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         bindWatcher()
         ensureLoginItemConfigured()
         AutoUpdater.shared.startPeriodicChecks()
+    }
+
+    private func targetWindowHeight(stats: TokenStats, isCompact: Bool) -> CGFloat {
+        if isCompact {
+            return compactHeight
+        }
+        return stats.hasThreePQuota ? expandedFullHeight : expandedBaseHeight
     }
 
     private func setupMenuBar() {
@@ -39,7 +49,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMenu() {
         let menu = NSMenu()
 
-        let headerItem = NSMenuItem(title: "Gemini Models Quota Tracker", action: nil, keyEquivalent: "")
+        let headerItem = NSMenuItem(title: "AI Quota & M3 Ultra Tracker", action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
         menu.addItem(headerItem)
 
@@ -79,14 +89,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        // Keep statusItem.menu nil at rest so AppKit delivers left-clicks to menuBarClicked(_:)
+        self.contextMenu = menu
     }
 
     private func isLaunchAtLoginEnabled() -> Bool {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
         }
-        let plistPath = ("~/Library/LaunchAgents/com.antigravity.tokentracker.plist" as NSString).expandingTildeInPath
+        let plistPath = ("~/Library/LaunchAgents/com.antigravity.tokentracker.app.plist" as NSString).expandingTildeInPath
         return FileManager.default.fileExists(atPath: plistPath)
     }
 
@@ -114,10 +125,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHUDWindow() {
         guard let screen = NSScreen.main else { return }
         let screenRect = screen.visibleFrame
+        let initialHeight = targetWindowHeight(stats: watcher.stats, isCompact: watcher.isCompact)
+        lastAppliedHeight = initialHeight
         let initialX = screenRect.maxX - hudWidth - 20
-        let initialY = screenRect.maxY - expandedHeight - 20
+        let initialY = screenRect.maxY - initialHeight - 20
 
-        let rect = NSRect(x: initialX, y: initialY, width: hudWidth, height: expandedHeight)
+        let rect = NSRect(x: initialX, y: initialY, width: hudWidth, height: initialHeight)
         let window = FloatingHUDWindow(contentRect: rect)
 
         let rootView = FloatingHUDView(watcher: watcher)
@@ -135,10 +148,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func bindWatcher() {
-        watcher.$stats
+        Publishers.CombineLatest(watcher.$stats, watcher.$isOffline)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] stats in
-                self?.updateStatusButton(stats: stats)
+            .sink { [weak self] stats, isOffline in
+                guard let self = self else { return }
+                self.updateStatusButton(stats: stats, isOffline: isOffline)
+                let desired = self.targetWindowHeight(stats: stats, isCompact: self.watcher.isCompact)
+                if abs(desired - self.lastAppliedHeight) > 1 {
+                    self.animateWindowResize(targetHeight: desired)
+                }
             }
             .store(in: &cancellables)
 
@@ -157,34 +175,53 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.$isCompact
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isCompact in
-                self?.animateWindowResize(isCompact: isCompact)
+                guard let self = self else { return }
+                let desired = self.targetWindowHeight(stats: self.watcher.stats, isCompact: isCompact)
+                self.animateWindowResize(targetHeight: desired)
             }
             .store(in: &cancellables)
     }
 
-    private func updateStatusButton(stats: TokenStats) {
+    private func updateStatusButton(stats: TokenStats, isOffline: Bool) {
         guard let button = statusItem.button else { return }
 
         let lowest = stats.lowestRemainingPct
         let tag = stats.lowestTag
         let pctStr = String(format: "%.0f%%", lowest)
-        let icon = stats.isBusy == true ? "⚡️" : "🟢"
+        let icon: String
+        if isOffline {
+            icon = "⚪️"
+        } else if stats.isBusy == true {
+            icon = "⚡️"
+        } else {
+            icon = "🟢"
+        }
 
         let font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        let boldFont = NSFont.systemFont(ofSize: 13, weight: .bold)
+        let boldFont = NSFont.systemFont(ofSize: 12, weight: .bold)
 
         let attrTitle = NSMutableAttributedString()
         attrTitle.append(NSAttributedString(string: "\(icon) \(pctStr) ", attributes: [
             .font: font,
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: isOffline ? NSColor.secondaryLabelColor : NSColor.labelColor
         ]))
         attrTitle.append(NSAttributedString(string: tag, attributes: [
             .font: boldFont,
-            .foregroundColor: statusColor(for: lowest)
+            .foregroundColor: isOffline ? NSColor.secondaryLabelColor : statusColor(for: lowest)
         ]))
 
         button.attributedTitle = attrTitle
-        button.toolTip = "Gemini Quota Tracker\n5h: \(String(format: "%.0f%%", stats.calculated5hRemainingPct))\n7d: \(String(format: "%.0f%%", stats.calculatedWeeklyRemainingPct))\nShowing lowest: \(tag)"
+
+        var tipLines = [
+            isOffline ? "AI Quota Tracker (Offline - Cached)" : "AI Quota Tracker (Live Sync)",
+            String(format: "Gemini — 5h: %.0f%% | 7d: %.0f%%", stats.calculated5hRemainingPct, stats.calculatedWeeklyRemainingPct)
+        ]
+        if stats.hasThreePQuota {
+            tipLines.append(String(format: "Claude/GPT — 5h: %.0f%% | 7d: %.0f%%", stats.calculated3p5hRemainingPct, stats.calculated3pWeeklyRemainingPct))
+        }
+        tipLines.append("M3 Ultra — \(stats.formattedSavings) saved (\(stats.formattedFreeTokens) tok · \(stats.formattedSpeed))")
+        tipLines.append("Left-click: Toggle HUD · Right-click: Menu")
+        button.toolTip = tipLines.joined(separator: "\n")
     }
 
     private func statusColor(for pct: Double) -> NSColor {
@@ -197,9 +234,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func animateWindowResize(isCompact: Bool) {
+    private func animateWindowResize(targetHeight: CGFloat) {
         guard let window = hudWindow else { return }
-        let targetHeight = isCompact ? compactHeight : expandedHeight
+        lastAppliedHeight = targetHeight
         let currentFrame = window.frame
         let topY = currentFrame.origin.y + currentFrame.height
         let newOriginY = topY - targetHeight
@@ -221,12 +258,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuBarClicked(_ sender: NSStatusBarButton) {
-        if let event = NSApp.currentEvent {
-            if event.type == .rightMouseUp {
-                statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 5), in: sender)
-            } else {
-                watcher.toggleVisibility()
+        guard let event = NSApp.currentEvent else {
+            watcher.toggleVisibility()
+            return
+        }
+        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            statusItem.menu = contextMenu
+            sender.performClick(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.statusItem.menu = nil
             }
+        } else {
+            watcher.toggleVisibility()
         }
     }
 
@@ -241,7 +284,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func snapTopRightAction() {
         guard let window = hudWindow, let screen = NSScreen.main else { return }
         let screenRect = screen.visibleFrame
-        let targetHeight = watcher.isCompact ? compactHeight : expandedHeight
+        let targetHeight = targetWindowHeight(stats: watcher.stats, isCompact: watcher.isCompact)
+        lastAppliedHeight = targetHeight
         let newX = screenRect.maxX - hudWidth - 20
         let newY = screenRect.maxY - targetHeight - 20
         window.setFrame(NSRect(x: newX, y: newY, width: hudWidth, height: targetHeight), display: true, animate: true)

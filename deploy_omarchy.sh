@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Multi-Device Omarchy Parallel Deployment Script
-# Automatically deploys Quickshell token tracker plugins to all Omarchy laptops.
+# Multi-Device Omarchy Parallel Deployment Script (Client Display Widgets Only)
+# Syncs Quickshell QML bar widget files to online Omarchy laptops; relies on
+# Omarchy's native inotifywait plugin hot-reload + Syncthing peer propagation.
 # ==============================================================================
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -19,22 +20,20 @@ TARGETS=(
     "omarchy-dell|cjh@192.168.32.223|Dell XPS (omarchy-dell)"
 )
 
-echo "=== Deploying Token Tracker Plugin to Omarchy Devices ==="
+echo "=== Deploying Token Tracker QML Widget to Omarchy Clients ==="
 
 for entry in "${TARGETS[@]}"; do
     IFS="|" read -r SSH_HOST SSH_TARGET DISPLAY_NAME <<< "$entry"
-    echo -n "Checking $DISPLAY_NAME ($SSH_HOST)... "
+    echo -n "Checking $DISPLAY_NAME ($SSH_TARGET)... "
 
-    if ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o ConnectTimeout=3 "$SSH_HOST" "true" 2>/dev/null; then
+    if ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o ConnectTimeout=2 "$SSH_TARGET" "true" 2>/dev/null; then
         echo "ONLINE"
-        echo "  -> Syncing QML plugin files..."
-        ssh -i ~/.ssh/id_ed25519 "$SSH_HOST" "mkdir -p $TARGET_DIR"
-        scp -i ~/.ssh/id_ed25519 -r "$PLUGIN_SRC/"* "$SSH_HOST:$TARGET_DIR/"
-        echo "  -> Reloading Quickshell..."
-        ssh -i ~/.ssh/id_ed25519 "$SSH_HOST" "pkill quickshell || true"
-        echo "  [✓] $DISPLAY_NAME successfully updated."
+        echo "  -> Syncing QML plugin files (hot-reloaded automatically via inotifywait)..."
+        ssh -i ~/.ssh/id_ed25519 "$SSH_TARGET" "mkdir -p $TARGET_DIR"
+        scp -i ~/.ssh/id_ed25519 -r "$PLUGIN_SRC/"* "$SSH_TARGET:$TARGET_DIR/"
+        echo "  [✓] $DISPLAY_NAME updated cleanly."
     else
-        echo "OFFLINE (will receive update upon next sync/wake)"
+        echo "OFFLINE (will sync via Syncthing or next deploy)"
     fi
 done
 
