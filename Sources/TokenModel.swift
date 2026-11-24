@@ -47,6 +47,8 @@ public struct TokenStats: Codable {
     public var lowestOverallPct: Double?
     public var lowestOverallTag: String?
     public var officialSyncStatus: String?
+    public var activePool: String?
+    public var activeCloudModel: String?
     public var lastChat: String?
     public var lastTool: String?
     public var lastVolume: String?
@@ -100,6 +102,8 @@ public struct TokenStats: Codable {
         case lowestOverallPct = "lowest_overall_pct"
         case lowestOverallTag = "lowest_overall_tag"
         case officialSyncStatus = "official_sync_status"
+        case activePool = "active_pool"
+        case activeCloudModel = "active_cloud_model"
         case lastChat = "last_chat"
         case lastTool = "last_tool"
         case lastVolume = "last_volume"
@@ -155,6 +159,8 @@ public struct TokenStats: Codable {
             lowestOverallPct: nil,
             lowestOverallTag: nil,
             officialSyncStatus: "WAITING",
+            activePool: "gemini",
+            activeCloudModel: nil,
             lastChat: "None",
             lastTool: "Idle",
             lastVolume: "-",
@@ -204,6 +210,26 @@ public struct TokenStats: Codable {
         return threePWeeklyRemainingPct ?? 100.0
     }
 
+    public var isThreePPoolActive: Bool {
+        return activePool == "3p" && hasThreePQuota
+    }
+
+    public var activePoolBuckets: [QuotaBucketSummary] {
+        if isThreePPoolActive {
+            var list: [QuotaBucketSummary] = [
+                QuotaBucketSummary(title: "Claude/GPT Weekly", tag: "(C7)", percentage: calculated3pWeeklyRemainingPct, kind: "C7")
+            ]
+            if threePFiveHourDisabled != true {
+                list.append(QuotaBucketSummary(title: "Claude/GPT 5-Hour", tag: "(C5)", percentage: calculated3p5hRemainingPct, kind: "C5"))
+            }
+            return list
+        }
+        return [
+            QuotaBucketSummary(title: "Gemini Weekly", tag: "(G7)", percentage: calculatedWeeklyRemainingPct, kind: "G7"),
+            QuotaBucketSummary(title: "Gemini 5-Hour", tag: "(G5)", percentage: calculated5hRemainingPct, kind: "G5")
+        ]
+    }
+
     public var allBuckets: [QuotaBucketSummary] {
         var list: [QuotaBucketSummary] = [
             QuotaBucketSummary(title: "Gemini Weekly", tag: "(G7)", percentage: calculatedWeeklyRemainingPct, kind: "G7"),
@@ -219,7 +245,7 @@ public struct TokenStats: Codable {
     }
 
     public var lowestBucket: QuotaBucketSummary {
-        return allBuckets.min(by: { $0.percentage < $1.percentage }) ?? QuotaBucketSummary(title: "Gemini 5-Hour", tag: "(G5)", percentage: calculated5hRemainingPct, kind: "G5")
+        return activePoolBuckets.min(by: { $0.percentage < $1.percentage }) ?? QuotaBucketSummary(title: "Gemini 5-Hour", tag: "(G5)", percentage: calculated5hRemainingPct, kind: "G5")
     }
 
     public var lowestRemainingPct: Double {

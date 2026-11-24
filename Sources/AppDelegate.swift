@@ -231,6 +231,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             let p5Text = (stats.threePFiveHourDisabled == true) ? "Paused" : String(format: "%.0f%%", stats.calculated3p5hRemainingPct)
             tipLines.append(String(format: "Claude/GPT — 5h: %@ | 7d: %.0f%%", p5Text, stats.calculated3pWeeklyRemainingPct))
         }
+        if let model = stats.activeCloudModel, !model.isEmpty {
+            let poolLabel = stats.isThreePPoolActive ? "Claude/GPT" : "Gemini"
+            tipLines.append("Active: \(model) (\(poolLabel))")
+        }
         tipLines.append("M3 Ultra — \(stats.formattedSavings) saved (\(stats.formattedFreeTokens) tok · \(stats.formattedSpeed))")
         tipLines.append("Left-click: Toggle HUD · Right-click: Menu")
         button.toolTip = tipLines.joined(separator: "\n")

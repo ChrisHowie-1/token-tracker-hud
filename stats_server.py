@@ -8,6 +8,7 @@ atomically under flock, and serves telemetry + macOS app auto-updates over dual-
 
 import datetime
 import fcntl
+import glob
 import hashlib
 import http.server
 import json
@@ -21,6 +22,7 @@ import threading
 import time
 
 SOURCE_STATS = "/Users/chrishowie/.gemini/antigravity/local_ai_stats.json"
+TRANSCRIPTS_GLOB = "/Users/chrishowie/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl"
 PROJECT_BUILD_DIR = "/Users/chrishowie/Antigravity/Personal/Misc/TokenTrackerHUD/build"
 APP_BINARY_PATH = os.path.join(PROJECT_BUILD_DIR, "TokenTrackerHUD.app", "Contents", "MacOS", "TokenTrackerHUD")
 APP_ZIP_PATH = os.path.join(PROJECT_BUILD_DIR, "TokenTrackerHUD.app.zip")
@@ -32,6 +34,12 @@ _APP_HASH_CACHE = {
     "mtime": 0.0,
     "size": 0,
     "sha256": "",
+}
+_TRANSCRIPT_CACHE = {
+    "path": "",
+    "mtime": 0.0,
+    "model": "",
+    "pool": "gemini",
 }
 
 
@@ -114,70 +122,175 @@ def _atomic_update_stats(updates: dict):
         pass
 
 
+def detect_active_pool() -> tuple:
+    """Detect active Antigravity model and quota pool ('gemini' vs '3p') from newest transcript tail."""
+    try:
+        paths = glob.glob(TRANSCRIPTS_GLOB)
+        if not paths:
+            return _TRANSCRIPT_CACHE["pool"], _TRANSCRIPT_CACHE["model"]
+
+        newest_path = ""
+        newest_mtime = -1.0
+        for p in paths:
+            try:
+                mt = os.path.getmtime(p)
+                if mt > newest_mtime:
+                    newest_mtime = mt
+                    newest_path = p
+            except OSError:
+                continue
+
+        if not newest_path:
+            return _TRANSCRIPT_CACHE["pool"], _TRANSCRIPT_CACHE["model"]
+
+        if newest_path == _TRANSCRIPT_CACHE["path"] and newest_mtime == _TRANSCRIPT_CACHE["mtime"]:
+            return _TRANSCRIPT_CACHE["pool"], _TRANSCRIPT_CACHE["model"]
+
+        detected_model = ""
+        with open(newest_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 32768))
+            chunk = f.read().decode("utf-8", errors="replace")
+
+        for line in reversed(chunk.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            m_val = obj.get("model")
+            if isinstance(m_val, str) and m_val.strip():
+                detected_model = m_val.strip()
+                break
+
+        if detected_model:
+            lower_m = detected_model.lower()
+            pool = "3p" if any(tok in lower_m for tok in ("claude", "gpt", "opus", "sonnet")) else "gemini"
+        else:
+            pool = _TRANSCRIPT_CACHE["pool"]
+            detected_model = _TRANSCRIPT_CACHE["model"]
+
+        _TRANSCRIPT_CACHE["path"] = newest_path
+        _TRANSCRIPT_CACHE["mtime"] = newest_mtime
+        _TRANSCRIPT_CACHE["model"] = detected_model
+        _TRANSCRIPT_CACHE["pool"] = pool
+        return pool, detected_model
+    except Exception:
+        return _TRANSCRIPT_CACHE["pool"], _TRANSCRIPT_CACHE["model"]
+
+
+def _select_active_lowest(active_pool: str, gemini_candidates: list, three_p_candidates: list):
+    candidates = three_p_candidates if (active_pool == "3p" and three_p_candidates) else gemini_candidates
+    if not candidates:
+        candidates = gemini_candidates or three_p_candidates
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: x[0])
+
+
 def sync_loop():
     consecutive_failures = 0
+    next_quota_sync = 0.0
+    last_pool_written = None
+    last_model_written = None
+    cached_gemini_candidates = []
+    cached_three_p_candidates = []
+
     while True:
-        sleep_sec = 30.0
+        now = time.time()
         try:
-            official = fetch_official_quota()
-            if official:
-                consecutive_failures = 0
-                quota_updates = {
-                    "official_sync_status": "LIVE_RPC_SYNC",
-                    "official_sync_source": "agy_cli",
+            active_pool, active_model = detect_active_pool()
+
+            if now >= next_quota_sync:
+                official = fetch_official_quota()
+                if official:
+                    consecutive_failures = 0
+                    next_quota_sync = time.time() + 30.0
+                    quota_updates = {
+                        "official_sync_status": "LIVE_RPC_SYNC",
+                        "official_sync_source": "agy_cli",
+                        "active_pool": active_pool,
+                        "active_cloud_model": active_model,
+                    }
+                    groups = official.get("groups") or official.get("response", {}).get("groups", [])
+                    gemini_candidates = []
+                    three_p_candidates = []
+
+                    for g in groups:
+                        g_name = g.get("name") or g.get("displayName") or ""
+                        for b in g.get("buckets", []):
+                            b_id = b.get("id") or b.get("bucketId") or ""
+                            rf = b.get("remaining_fraction") if "remaining_fraction" in b else b.get("remainingFraction")
+                            pct = float(round(rf * 100)) if rf is not None else 100.0
+                            reset_iso = b.get("reset_time") or b.get("resetTime")
+                            reset_ts = _parse_reset_ts(reset_iso)
+                            disabled = bool(b.get("disabled", False))
+                            countdown_str = _parse_countdown(b.get("description") or "")
+
+                            if b_id == "gemini-5h" or (g_name == "Gemini Models" and b.get("window") == "5h"):
+                                quota_updates["five_hour_remaining_pct"] = pct
+                                quota_updates["five_hour_refresh_time"] = countdown_str or "Ready"
+                                quota_updates["five_hour_reset_timestamp"] = reset_ts or 0.0
+                                gemini_candidates.append((pct, "(G5)"))
+                            elif b_id == "gemini-weekly" or (g_name == "Gemini Models" and b.get("window") == "weekly"):
+                                quota_updates["weekly_remaining_pct"] = pct
+                                quota_updates["weekly_refresh_time"] = countdown_str or "Ready"
+                                quota_updates["weekly_reset_timestamp"] = reset_ts or 0.0
+                                gemini_candidates.append((pct, "(G7)"))
+                            elif b_id == "3p-5h" or ("Claude" in g_name and b.get("window") == "5h"):
+                                quota_updates["three_p_five_hour_remaining_pct"] = pct
+                                quota_updates["three_p_five_hour_disabled"] = disabled
+                                quota_updates["three_p_five_hour_refresh_time"] = "Weekly hit" if disabled else (countdown_str or "Ready")
+                                quota_updates["three_p_five_hour_reset_timestamp"] = 0.0 if disabled else (reset_ts or 0.0)
+                                if not disabled:
+                                    three_p_candidates.append((pct, "(C5)"))
+                            elif b_id == "3p-weekly" or ("Claude" in g_name and b.get("window") == "weekly"):
+                                quota_updates["three_p_weekly_remaining_pct"] = pct
+                                quota_updates["three_p_weekly_refresh_time"] = countdown_str or "Ready"
+                                quota_updates["three_p_weekly_reset_timestamp"] = reset_ts or 0.0
+                                three_p_candidates.append((pct, "(C7)"))
+
+                    cached_gemini_candidates = gemini_candidates
+                    cached_three_p_candidates = three_p_candidates
+                    lowest = _select_active_lowest(active_pool, cached_gemini_candidates, cached_three_p_candidates)
+                    if lowest:
+                        quota_updates["lowest_overall_pct"] = lowest[0]
+                        quota_updates["lowest_overall_tag"] = lowest[1]
+
+                    _atomic_update_stats(quota_updates)
+                    last_pool_written = active_pool
+                    last_model_written = active_model
+                else:
+                    consecutive_failures += 1
+                    next_quota_sync = time.time() + 15.0
+                    stale_updates = {
+                        "active_pool": active_pool,
+                        "active_cloud_model": active_model,
+                    }
+                    if consecutive_failures >= 2:
+                        stale_updates["official_sync_status"] = "STALE_RPC"
+                    _atomic_update_stats(stale_updates)
+                    last_pool_written = active_pool
+                    last_model_written = active_model
+            elif active_pool != last_pool_written or active_model != last_model_written:
+                pool_updates = {
+                    "active_pool": active_pool,
+                    "active_cloud_model": active_model,
                 }
-                groups = official.get("groups") or official.get("response", {}).get("groups", [])
-                pool_candidates = []
-
-                for g in groups:
-                    g_name = g.get("name") or g.get("displayName") or ""
-                    for b in g.get("buckets", []):
-                        b_id = b.get("id") or b.get("bucketId") or ""
-                        rf = b.get("remaining_fraction") if "remaining_fraction" in b else b.get("remainingFraction")
-                        pct = float(round(rf * 100)) if rf is not None else 100.0
-                        reset_iso = b.get("reset_time") or b.get("resetTime")
-                        reset_ts = _parse_reset_ts(reset_iso)
-                        disabled = bool(b.get("disabled", False))
-                        countdown_str = _parse_countdown(b.get("description") or "")
-
-                        if b_id == "gemini-5h" or (g_name == "Gemini Models" and b.get("window") == "5h"):
-                            quota_updates["five_hour_remaining_pct"] = pct
-                            quota_updates["five_hour_refresh_time"] = countdown_str or "Ready"
-                            quota_updates["five_hour_reset_timestamp"] = reset_ts or 0.0
-                            pool_candidates.append((pct, "(G5)"))
-                        elif b_id == "gemini-weekly" or (g_name == "Gemini Models" and b.get("window") == "weekly"):
-                            quota_updates["weekly_remaining_pct"] = pct
-                            quota_updates["weekly_refresh_time"] = countdown_str or "Ready"
-                            quota_updates["weekly_reset_timestamp"] = reset_ts or 0.0
-                            pool_candidates.append((pct, "(G7)"))
-                        elif b_id == "3p-5h" or ("Claude" in g_name and b.get("window") == "5h"):
-                            quota_updates["three_p_five_hour_remaining_pct"] = pct
-                            quota_updates["three_p_five_hour_disabled"] = disabled
-                            quota_updates["three_p_five_hour_refresh_time"] = "Weekly hit" if disabled else (countdown_str or "Ready")
-                            quota_updates["three_p_five_hour_reset_timestamp"] = 0.0 if disabled else (reset_ts or 0.0)
-                            if not disabled:
-                                pool_candidates.append((pct, "(C5)"))
-                        elif b_id == "3p-weekly" or ("Claude" in g_name and b.get("window") == "weekly"):
-                            quota_updates["three_p_weekly_remaining_pct"] = pct
-                            quota_updates["three_p_weekly_refresh_time"] = countdown_str or "Ready"
-                            quota_updates["three_p_weekly_reset_timestamp"] = reset_ts or 0.0
-                            pool_candidates.append((pct, "(C7)"))
-
-                if pool_candidates:
-                    lowest_pct, lowest_tag = min(pool_candidates, key=lambda x: x[0])
-                    quota_updates["lowest_overall_pct"] = lowest_pct
-                    quota_updates["lowest_overall_tag"] = lowest_tag
-
-                _atomic_update_stats(quota_updates)
-            else:
-                consecutive_failures += 1
-                sleep_sec = 15.0
-                if consecutive_failures >= 2:
-                    _atomic_update_stats({"official_sync_status": "STALE_RPC"})
+                lowest = _select_active_lowest(active_pool, cached_gemini_candidates, cached_three_p_candidates)
+                if lowest:
+                    pool_updates["lowest_overall_pct"] = lowest[0]
+                    pool_updates["lowest_overall_tag"] = lowest[1]
+                _atomic_update_stats(pool_updates)
+                last_pool_written = active_pool
+                last_model_written = active_model
         except Exception:
             consecutive_failures += 1
-            sleep_sec = 15.0
-        time.sleep(sleep_sec)
+            next_quota_sync = time.time() + 15.0
+        time.sleep(2.0)
 
 
 def _get_app_version_metadata():

@@ -20,31 +20,23 @@ Panel {
 
   property bool isBusy: !isOffline && statsData && statsData.is_busy === true
   property bool isStaleRpc: !isOffline && statsData && statsData.official_sync_status === "STALE_RPC"
+  property string activePool: statsData && statsData.active_pool ? statsData.active_pool : "gemini"
   property real weeklyRemainingPct: statsData && statsData.weekly_remaining_pct !== undefined ? statsData.weekly_remaining_pct : 100.0
   property real fiveHourRemainingPct: statsData && statsData.five_hour_remaining_pct !== undefined ? statsData.five_hour_remaining_pct : 100.0
   property bool hasThreeP: statsData !== null && (statsData.three_p_five_hour_remaining_pct !== undefined || statsData.three_p_weekly_remaining_pct !== undefined)
   property bool threeP5hDisabled: statsData !== null && statsData.three_p_five_hour_disabled === true
+  property bool isThreePPoolActive: activePool === "3p" && hasThreeP
   property real threePFiveHourPct: statsData && statsData.three_p_five_hour_remaining_pct !== undefined ? statsData.three_p_five_hour_remaining_pct : 100.0
   property real threePWeeklyPct: statsData && statsData.three_p_weekly_remaining_pct !== undefined ? statsData.three_p_weekly_remaining_pct : 100.0
 
   readonly property string lowestKind: {
-    var bestKind = "G7"
-    var bestVal = weeklyRemainingPct
-    if (fiveHourRemainingPct <= bestVal) {
-      bestVal = fiveHourRemainingPct
-      bestKind = "G5"
-    }
-    if (hasThreeP) {
-      if (!threeP5hDisabled && threePFiveHourPct < bestVal) {
-        bestVal = threePFiveHourPct
-        bestKind = "C5"
+    if (isThreePPoolActive) {
+      if (!threeP5hDisabled && threePFiveHourPct <= threePWeeklyPct) {
+        return "C5"
       }
-      if (threePWeeklyPct < bestVal) {
-        bestVal = threePWeeklyPct
-        bestKind = "C7"
-      }
+      return "C7"
     }
-    return bestKind
+    return (fiveHourRemainingPct <= weeklyRemainingPct) ? "G5" : "G7"
   }
 
   readonly property real lowestPct: {
@@ -163,6 +155,9 @@ Panel {
       if (root.hasThreeP) {
         var c5Str = root.threeP5hDisabled ? "Paused" : (root.threePFiveHourPct.toFixed(0) + "%")
         lines.push("Claude/GPT — 5h: " + c5Str + " | 7d: " + root.threePWeeklyPct.toFixed(0) + "%")
+      }
+      if (statsData && statsData.active_cloud_model) {
+        lines.push("Active: " + statsData.active_cloud_model + " (" + (root.isThreePPoolActive ? "Claude/GPT" : "Gemini") + ")")
       }
       lines.push("M3 Ultra — " + root.m3SummaryText)
       return lines.join("\n")
