@@ -31,8 +31,10 @@ PanelWindow {
   property real nowEpoch: Date.now() / 1000.0
 
   property bool hasThreeP: statsData !== null && (statsData.three_p_five_hour_remaining_pct !== undefined || statsData.three_p_weekly_remaining_pct !== undefined)
+  property bool threeP5hDisabled: statsData !== null && statsData.three_p_five_hour_disabled === true
+  property bool isStaleRpc: !isOffline && statsData && statsData.official_sync_status === "STALE_RPC"
   implicitWidth: 360
-  implicitHeight: isCompact ? 186 : (hasThreeP ? 364 : 292)
+  implicitHeight: isCompact ? 186 : (hasThreeP ? 384 : 292)
 
   color: "transparent"
 
@@ -43,7 +45,7 @@ PanelWindow {
   readonly property color accentRed: "#ff4d4d"
   readonly property color accentMuted: "#8d96a8"
 
-  readonly property color statusColor: isOffline ? accentMuted : (isBusy ? accentGreen : accentBlue)
+  readonly property color statusColor: isOffline ? accentMuted : (isBusy ? accentGreen : (isStaleRpc ? accentOrange : accentBlue))
 
   property real weeklyRemainingPct: statsData && statsData.weekly_remaining_pct !== undefined ? statsData.weekly_remaining_pct : 100.0
   property real fiveHourRemainingPct: statsData && statsData.five_hour_remaining_pct !== undefined ? statsData.five_hour_remaining_pct : 100.0
@@ -55,7 +57,7 @@ PanelWindow {
       var rem = resetTs - hud.nowEpoch
       return Math.floor(rem / 3600) + "h " + Math.floor((rem % 3600) / 60) + "m"
     }
-    return fallbackStr ? fallbackStr : "Ready"
+    return (fallbackStr && ("" + fallbackStr).trim().length > 0) ? fallbackStr : "Ready"
   }
 
   function formatWeekly(resetTs, fallbackStr) {
@@ -63,7 +65,7 @@ PanelWindow {
       var rem = resetTs - hud.nowEpoch
       return Math.floor(rem / 86400) + "d " + Math.round((rem % 86400) / 3600) + "h"
     }
-    return fallbackStr ? fallbackStr : "Ready"
+    return (fallbackStr && ("" + fallbackStr).trim().length > 0) ? fallbackStr : "Ready"
   }
 
   function formatCompactTokens(num) {
@@ -75,15 +77,15 @@ PanelWindow {
 
   property string weeklyRefreshText: "Refreshes in " + formatWeekly(statsData ? statsData.weekly_reset_timestamp : 0, statsData ? statsData.weekly_refresh_time : "Calculating...")
   property string fiveHourRefreshText: "Refreshes in " + format5h(statsData ? statsData.five_hour_reset_timestamp : 0, statsData ? statsData.five_hour_refresh_time : "Calculating...")
-  property string threeP5hText: format5h(statsData ? statsData.three_p_five_hour_reset_timestamp : 0, statsData ? statsData.three_p_five_hour_refresh_time : "Ready")
+  property string threeP5hText: threeP5hDisabled ? "Weekly hit" : format5h(statsData ? statsData.three_p_five_hour_reset_timestamp : 0, statsData ? statsData.three_p_five_hour_refresh_time : "Ready")
   property string threeP7dText: formatWeekly(statsData ? statsData.three_p_weekly_reset_timestamp : 0, statsData ? statsData.three_p_weekly_refresh_time : "Ready")
 
   property string m3SummaryText: {
     if (!statsData) return "Waiting for Mac Studio..."
     var gbp = Math.max(statsData.total_context_savings_gbp || 0, statsData.total_savings_gbp || 0)
     var tok = formatCompactTokens(statsData.total_free_tokens || 0)
-    var spd = statsData.last_speed_tok_s ? Math.round(statsData.last_speed_tok_s) + " tok/s" : (statsData.last_engine || "oMLX")
-    return "£" + gbp.toFixed(2) + " saved · " + tok + " tok · " + spd
+    var spd = statsData.last_speed_tok_s ? Math.round(statsData.last_speed_tok_s) + "/s" : (statsData.last_engine || "oMLX")
+    return "£" + gbp.toFixed(2) + " · " + tok + " · " + spd
   }
 
   function refresh() {
@@ -200,7 +202,7 @@ PanelWindow {
         }
 
         Text {
-          text: hud.isOffline ? "AI Quota Tracker (Offline)" : "AI Quota Tracker"
+          text: hud.isOffline ? "AI Quota Tracker (Offline)" : (hud.isStaleRpc ? "AI Quota Tracker (Stale)" : "AI Quota Tracker")
           color: Qt.rgba(1, 1, 1, 0.95)
           font.pixelSize: 13
           font.bold: true
@@ -275,41 +277,58 @@ PanelWindow {
       Rectangle {
         width: parent.width
         visible: !hud.isCompact && hud.hasThreeP
-        implicitHeight: 62
+        implicitHeight: 82
         radius: 13
         color: "#b31a1e2b"
         border.color: Qt.rgba(1, 1, 1, 0.16)
         border.width: 1
 
-        RowLayout {
+        ColumnLayout {
           anchors.fill: parent
           anchors.margins: 10
-          spacing: 12
+          spacing: 6
 
-          ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 3
-            RowLayout {
-              Layout.fillWidth: true
-              Text { text: "Claude/GPT 5h"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-              Item { Layout.fillWidth: true }
-              Text { text: hud.threePFiveHourPct.toFixed(0) + "%"; color: hud.getCardColor(hud.threePFiveHourPct); font.pixelSize: 13; font.bold: true }
-            }
-            Text { text: "(C5) · " + hud.threeP5hText; color: "#99a3b5"; font.pixelSize: 10 }
+          Text {
+            text: "Claude & GPT"
+            color: "#e0e6f0"
+            font.pixelSize: 11
+            font.bold: true
           }
 
-          Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(1, 1, 1, 0.12) }
-
-          ColumnLayout {
+          RowLayout {
             Layout.fillWidth: true
-            spacing: 3
-            RowLayout {
+            spacing: 12
+
+            ColumnLayout {
               Layout.fillWidth: true
-              Text { text: "Claude/GPT 7d"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-              Item { Layout.fillWidth: true }
-              Text { text: hud.threePWeeklyPct.toFixed(0) + "%"; color: hud.getCardColor(hud.threePWeeklyPct); font.pixelSize: 13; font.bold: true }
+              spacing: 3
+              RowLayout {
+                Layout.fillWidth: true
+                Text { text: "5-Hour"; color: hud.threeP5hDisabled ? hud.accentMuted : "#ffffff"; font.pixelSize: 11; font.bold: true }
+                Item { Layout.fillWidth: true }
+                Text {
+                  text: hud.threeP5hDisabled ? "Paused" : (hud.threePFiveHourPct.toFixed(0) + "%")
+                  color: hud.threeP5hDisabled ? hud.accentMuted : hud.getCardColor(hud.threePFiveHourPct)
+                  font.pixelSize: hud.threeP5hDisabled ? 11 : 13
+                  font.bold: true
+                }
+              }
+              Text { text: "(C5) · " + hud.threeP5hText; color: "#99a3b5"; font.pixelSize: 10 }
             }
-            Text { text: "(C7) · " + hud.threeP7dText; color: "#99a3b5"; font.pixelSize: 10 }
+
+            Rectangle { width: 1; Layout.fillHeight: true; color: Qt.rgba(1, 1, 1, 0.12) }
+
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: 3
+              RowLayout {
+                Layout.fillWidth: true
+                Text { text: "Weekly"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+                Item { Layout.fillWidth: true }
+                Text { text: hud.threePWeeklyPct.toFixed(0) + "%"; color: hud.getCardColor(hud.threePWeeklyPct); font.pixelSize: 13; font.bold: true }
+              }
+              Text { text: "(C7) · " + hud.threeP7dText; color: "#99a3b5"; font.pixelSize: 10 }
+            }
           }
         }
       }
@@ -327,7 +346,7 @@ PanelWindow {
           anchors.leftMargin: 10
           anchors.rightMargin: 10
           Text {
-            text: hud.isBusy ? "⚡️ M3 Ultra Active" : "🖥 M3 Ultra"
+            text: hud.isBusy ? "⚡️ M3 Ultra" : "🖥 M3 Ultra"
             color: hud.isBusy ? hud.accentGreen : "#e0e6f0"
             font.pixelSize: 11
             font.bold: true

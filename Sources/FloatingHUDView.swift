@@ -44,7 +44,15 @@ public struct FloatingHUDView: View {
 
     private var headerStatusColor: Color {
         if watcher.isOffline { return textMuted }
-        return watcher.stats.isBusy == true ? accentGreen : accentBlue
+        if watcher.stats.isBusy == true { return accentGreen }
+        if watcher.stats.isStaleRpc { return accentOrange }
+        return accentBlue
+    }
+
+    private var headerTitle: String {
+        if watcher.isOffline { return "AI Quota Tracker (Offline)" }
+        if watcher.stats.isStaleRpc { return "AI Quota Tracker (Stale)" }
+        return "AI Quota Tracker"
     }
 
     public var body: some View {
@@ -74,7 +82,7 @@ public struct FloatingHUDView: View {
                     .shadow(color: headerStatusColor.opacity(0.85), radius: 5, x: 0, y: 0)
                     .shadow(color: headerStatusColor.opacity(0.40), radius: 10, x: 0, y: 0)
 
-                    Text(watcher.isOffline ? "AI Quota Tracker (Offline)" : "AI Quota Tracker")
+                    Text(headerTitle)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(textWhite)
 
@@ -204,16 +212,22 @@ public struct FloatingHUDView: View {
     private func dualThreePCard(lowestKind: String) -> some View {
         let p5 = watcher.stats.calculated3p5hRemainingPct
         let p7 = watcher.stats.calculated3pWeeklyRemainingPct
+        let p5Disabled = watcher.stats.threePFiveHourDisabled == true
         let isAnyLowest = (lowestKind == "C5" || lowestKind == "C7")
-        let borderAccent = remainingColor(min(p5, p7))
+        let borderAccent = remainingColor(min(p5Disabled ? 100.0 : p5, p7))
 
         VStack(alignment: .leading, spacing: 6) {
+            Text("Claude & GPT")
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundColor(textLight)
+
             HStack(spacing: 10) {
                 miniPoolColumn(
-                    label: "Claude/GPT 5h",
+                    label: "5-Hour",
                     tag: "(C5)",
                     countdown: watcher.threePFiveHourCountdown,
-                    pct: p5
+                    pct: p5,
+                    isDisabled: p5Disabled
                 )
 
                 Rectangle()
@@ -221,10 +235,11 @@ public struct FloatingHUDView: View {
                     .frame(width: 1, height: 42)
 
                 miniPoolColumn(
-                    label: "Claude/GPT 7d",
+                    label: "Weekly",
                     tag: "(C7)",
                     countdown: watcher.threePWeeklyCountdown,
-                    pct: p7
+                    pct: p7,
+                    isDisabled: false
                 )
             }
         }
@@ -243,25 +258,26 @@ public struct FloatingHUDView: View {
     }
 
     @ViewBuilder
-    private func miniPoolColumn(label: String, tag: String, countdown: String, pct: Double) -> some View {
-        let col = remainingColor(pct)
+    private func miniPoolColumn(label: String, tag: String, countdown: String, pct: Double, isDisabled: Bool = false) -> some View {
+        let col = isDisabled ? textMuted : remainingColor(pct)
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(label)
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(textWhite)
+                    .foregroundColor(isDisabled ? textMuted : textWhite)
                     .lineLimit(1)
                 Spacer(minLength: 2)
-                Text(String(format: "%.0f%%", pct))
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                Text(isDisabled ? "Paused" : String(format: "%.0f%%", pct))
+                    .font(.system(size: isDisabled ? 11.5 : 14, weight: .heavy, design: .rounded))
                     .foregroundColor(col)
+                    .lineLimit(1)
             }
             Text("\(tag) · \(countdown)")
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundColor(textMuted)
                 .lineLimit(1)
 
-            liquidTube(percentage: pct, height: 6)
+            liquidTube(percentage: pct, height: 6, isMuted: isDisabled)
         }
         .frame(maxWidth: .infinity)
     }
@@ -272,14 +288,16 @@ public struct FloatingHUDView: View {
         HStack(spacing: 6) {
             Text(isBusy ? "⚡️" : "🖥")
                 .font(.system(size: 11))
-            Text(isBusy ? "M3 Ultra Active" : "M3 Ultra")
+            Text("M3 Ultra")
                 .font(.system(size: 10.5, weight: .bold, design: .rounded))
                 .foregroundColor(isBusy ? accentGreen : textLight)
-            Spacer()
-            Text("\(watcher.stats.formattedSavings) saved · \(watcher.stats.formattedFreeTokens) tok · \(watcher.stats.formattedSpeed)")
+                .fixedSize()
+            Spacer(minLength: 4)
+            Text("\(watcher.stats.formattedSavings) · \(watcher.stats.formattedFreeTokens) · \(watcher.stats.formattedCompactSpeed)")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundColor(isBusy ? accentGreen : accentBlue)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -360,10 +378,11 @@ public struct FloatingHUDView: View {
     }
 
     @ViewBuilder
-    private func liquidTube(percentage: Double, height: CGFloat) -> some View {
+    private func liquidTube(percentage: Double, height: CGFloat, isMuted: Bool = false) -> some View {
         GeometryReader { geo in
-            let fillWidth = max(height, geo.size.width * CGFloat(min(1.0, max(0.0, percentage) / 100.0)))
-            let color = remainingColor(percentage)
+            let clamped = isMuted ? 0.0 : min(1.0, max(0.0, percentage) / 100.0)
+            let fillWidth = isMuted ? height : max(height, geo.size.width * CGFloat(clamped))
+            let color = isMuted ? textMuted.opacity(0.45) : remainingColor(percentage)
 
             ZStack(alignment: .leading) {
                 Capsule()

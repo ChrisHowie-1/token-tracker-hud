@@ -19,9 +19,11 @@ Panel {
   property real nowEpoch: Date.now() / 1000.0
 
   property bool isBusy: !isOffline && statsData && statsData.is_busy === true
+  property bool isStaleRpc: !isOffline && statsData && statsData.official_sync_status === "STALE_RPC"
   property real weeklyRemainingPct: statsData && statsData.weekly_remaining_pct !== undefined ? statsData.weekly_remaining_pct : 100.0
   property real fiveHourRemainingPct: statsData && statsData.five_hour_remaining_pct !== undefined ? statsData.five_hour_remaining_pct : 100.0
   property bool hasThreeP: statsData !== null && (statsData.three_p_five_hour_remaining_pct !== undefined || statsData.three_p_weekly_remaining_pct !== undefined)
+  property bool threeP5hDisabled: statsData !== null && statsData.three_p_five_hour_disabled === true
   property real threePFiveHourPct: statsData && statsData.three_p_five_hour_remaining_pct !== undefined ? statsData.three_p_five_hour_remaining_pct : 100.0
   property real threePWeeklyPct: statsData && statsData.three_p_weekly_remaining_pct !== undefined ? statsData.three_p_weekly_remaining_pct : 100.0
 
@@ -33,7 +35,7 @@ Panel {
       bestKind = "G5"
     }
     if (hasThreeP) {
-      if (threePFiveHourPct < bestVal) {
+      if (!threeP5hDisabled && threePFiveHourPct < bestVal) {
         bestVal = threePFiveHourPct
         bestKind = "C5"
       }
@@ -61,7 +63,7 @@ Panel {
       var mins = Math.floor((rem % 3600) / 60)
       return hrs + "h " + mins + "m"
     }
-    return fallbackStr ? fallbackStr : "Ready"
+    return (fallbackStr && ("" + fallbackStr).trim().length > 0) ? fallbackStr : "Ready"
   }
 
   function formatWeekly(resetTs, fallbackStr) {
@@ -71,7 +73,7 @@ Panel {
       var hrs = Math.round((rem % 86400) / 3600)
       return days + "d " + hrs + "h"
     }
-    return fallbackStr ? fallbackStr : "Ready"
+    return (fallbackStr && ("" + fallbackStr).trim().length > 0) ? fallbackStr : "Ready"
   }
 
   function formatCompactTokens(num) {
@@ -83,15 +85,15 @@ Panel {
 
   property string weeklyRefreshText: "Refreshes in " + formatWeekly(statsData ? statsData.weekly_reset_timestamp : 0, statsData ? statsData.weekly_refresh_time : "Calculating...")
   property string fiveHourRefreshText: "Refreshes in " + format5h(statsData ? statsData.five_hour_reset_timestamp : 0, statsData ? statsData.five_hour_refresh_time : "Calculating...")
-  property string threeP5hText: format5h(statsData ? statsData.three_p_five_hour_reset_timestamp : 0, statsData ? statsData.three_p_five_hour_refresh_time : "Ready")
+  property string threeP5hText: threeP5hDisabled ? "Weekly hit" : format5h(statsData ? statsData.three_p_five_hour_reset_timestamp : 0, statsData ? statsData.three_p_five_hour_refresh_time : "Ready")
   property string threeP7dText: formatWeekly(statsData ? statsData.three_p_weekly_reset_timestamp : 0, statsData ? statsData.three_p_weekly_refresh_time : "Ready")
 
   property string m3SummaryText: {
     if (!statsData) return "Waiting for Mac Studio..."
     var gbp = Math.max(statsData.total_context_savings_gbp || 0, statsData.total_savings_gbp || 0)
     var tok = formatCompactTokens(statsData.total_free_tokens || 0)
-    var spd = statsData.last_speed_tok_s ? Math.round(statsData.last_speed_tok_s) + " tok/s" : (statsData.last_engine || "oMLX")
-    return "£" + gbp.toFixed(2) + " saved · " + tok + " tok · " + spd
+    var spd = statsData.last_speed_tok_s ? Math.round(statsData.last_speed_tok_s) + "/s" : (statsData.last_engine || "oMLX")
+    return "£" + gbp.toFixed(2) + " · " + tok + " · " + spd
   }
 
   readonly property color accentGreen: "#70c040"
@@ -99,7 +101,7 @@ Panel {
   readonly property color accentOrange: "#ff9433"
   readonly property color accentRed: "#ff4d4d"
   readonly property color accentMuted: "#8d96a8"
-  readonly property color statusColor: isOffline ? accentMuted : (isBusy ? accentGreen : accentBlue)
+  readonly property color statusColor: isOffline ? accentMuted : (isBusy ? accentGreen : (isStaleRpc ? accentOrange : accentBlue))
 
   function getCardColor(pct) {
     if (pct >= 50) return accentGreen
@@ -150,15 +152,17 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: (root.isOffline ? "⚪️ " : (root.isBusy ? "⚡️ " : "🟢 ")) + (statsData ? root.lowestPct.toFixed(0) + "%" : "--%") + "        "
+    text: (root.isOffline ? "⚪️ " : (root.isBusy ? "⚡️ " : (root.isStaleRpc ? "🟠 " : "🟢 "))) + (statsData ? root.lowestPct.toFixed(0) + "%" : "--%") + "        "
     slotSize: Style.bar.iconSlot * 3.15
     tooltipText: {
+      var header = root.isOffline ? "AI Quota Tracker (Offline)" : (root.isStaleRpc ? "AI Quota Tracker (Stale)" : "AI Quota Tracker (Live Sync)")
       var lines = [
-        root.isOffline ? "AI Quota Tracker (Offline)" : "AI Quota Tracker (Live Sync)",
+        header,
         "Gemini — 5h: " + root.fiveHourRemainingPct.toFixed(0) + "% | 7d: " + root.weeklyRemainingPct.toFixed(0) + "%"
       ]
       if (root.hasThreeP) {
-        lines.push("Claude/GPT — 5h: " + root.threePFiveHourPct.toFixed(0) + "% | 7d: " + root.threePWeeklyPct.toFixed(0) + "%")
+        var c5Str = root.threeP5hDisabled ? "Paused" : (root.threePFiveHourPct.toFixed(0) + "%")
+        lines.push("Claude/GPT — 5h: " + c5Str + " | 7d: " + root.threePWeeklyPct.toFixed(0) + "%")
       }
       lines.push("M3 Ultra — " + root.m3SummaryText)
       return lines.join("\n")
@@ -229,7 +233,7 @@ Panel {
         }
 
         Text {
-          text: root.isOffline ? "AI Quota Tracker (Offline)" : "AI Quota Tracker"
+          text: root.isOffline ? "AI Quota Tracker (Offline)" : (root.isStaleRpc ? "AI Quota Tracker (Stale)" : "AI Quota Tracker")
           color: root.bar.foreground
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.body
@@ -264,41 +268,56 @@ Panel {
       Rectangle {
         width: parent.width
         visible: root.hasThreeP
-        implicitHeight: Style.space(66)
+        implicitHeight: Style.space(86)
         radius: Style.space(12)
         color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.08)
         border.color: (root.lowestKind === "C5" || root.lowestKind === "C7")
-          ? root.getCardColor(Math.min(root.threePFiveHourPct, root.threePWeeklyPct))
+          ? root.getCardColor(Math.min(root.threeP5hDisabled ? 100.0 : root.threePFiveHourPct, root.threePWeeklyPct))
           : Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.16)
         border.width: (root.lowestKind === "C5" || root.lowestKind === "C7") ? 1.5 : 1
 
-        RowLayout {
+        ColumnLayout {
           anchors.fill: parent
           anchors.margins: Style.space(10)
-          spacing: Style.space(10)
+          spacing: Style.space(6)
 
-          MiniPoolCell {
-            Layout.fillWidth: true
-            label: "Claude/GPT 5h"
-            tag: "(C5)"
-            countdown: root.threeP5hText
-            percentage: root.threePFiveHourPct
-            cellColor: root.getCardColor(root.threePFiveHourPct)
+          Text {
+            text: "Claude & GPT"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
           }
 
-          Rectangle {
-            width: 1
-            Layout.fillHeight: true
-            color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.14)
-          }
-
-          MiniPoolCell {
+          RowLayout {
             Layout.fillWidth: true
-            label: "Claude/GPT 7d"
-            tag: "(C7)"
-            countdown: root.threeP7dText
-            percentage: root.threePWeeklyPct
-            cellColor: root.getCardColor(root.threePWeeklyPct)
+            spacing: Style.space(10)
+
+            MiniPoolCell {
+              Layout.fillWidth: true
+              label: "5-Hour"
+              tag: "(C5)"
+              countdown: root.threeP5hText
+              percentage: root.threePFiveHourPct
+              isDisabled: root.threeP5hDisabled
+              cellColor: root.threeP5hDisabled ? root.accentMuted : root.getCardColor(root.threePFiveHourPct)
+            }
+
+            Rectangle {
+              width: 1
+              Layout.fillHeight: true
+              color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.14)
+            }
+
+            MiniPoolCell {
+              Layout.fillWidth: true
+              label: "Weekly"
+              tag: "(C7)"
+              countdown: root.threeP7dText
+              percentage: root.threePWeeklyPct
+              isDisabled: false
+              cellColor: root.getCardColor(root.threePWeeklyPct)
+            }
           }
         }
       }
@@ -319,7 +338,7 @@ Panel {
           spacing: Style.space(6)
 
           Text {
-            text: root.isBusy ? "⚡️ M3 Ultra Active" : "🖥 M3 Ultra"
+            text: root.isBusy ? "⚡️ M3 Ultra" : "🖥 M3 Ultra"
             color: root.isBusy ? root.accentGreen : root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
@@ -345,6 +364,7 @@ Panel {
     property string tag: ""
     property string countdown: ""
     property real percentage: 100
+    property bool isDisabled: false
     property color cellColor: root.accentGreen
     spacing: Style.space(4)
 
@@ -352,17 +372,17 @@ Panel {
       width: parent.width
       Text {
         text: label
-        color: root.bar.foreground
+        color: isDisabled ? root.accentMuted : root.bar.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
         font.bold: true
       }
       Item { Layout.fillWidth: true }
       Text {
-        text: percentage.toFixed(0) + "%"
+        text: isDisabled ? "Paused" : (percentage.toFixed(0) + "%")
         color: cellColor
         font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.body
+        font.pixelSize: isDisabled ? Style.font.caption : Style.font.body
         font.bold: true
       }
     }
@@ -386,8 +406,8 @@ Panel {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         radius: parent.radius
-        color: cellColor
-        width: Math.max(parent.height, parent.width * Math.min(1.0, Math.max(0.0, percentage) / 100.0))
+        color: isDisabled ? Qt.rgba(0.55, 0.59, 0.66, 0.45) : cellColor
+        width: isDisabled ? parent.height : Math.max(parent.height, parent.width * Math.min(1.0, Math.max(0.0, percentage) / 100.0))
 
         Behavior on width {
           NumberAnimation { duration: 350; easing.type: Easing.OutCubic }

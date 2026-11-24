@@ -13,7 +13,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private let hudWidth: CGFloat = 336
     private let compactHeight: CGFloat = 158
     private let expandedBaseHeight: CGFloat = 236
-    private let expandedFullHeight: CGFloat = 314
+    private let expandedFullHeight: CGFloat = 334
     private var lastAppliedHeight: CGFloat = 0
 
     private var launchAtLoginItem: NSMenuItem?
@@ -193,6 +193,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             icon = "⚪️"
         } else if stats.isBusy == true {
             icon = "⚡️"
+        } else if stats.isStaleRpc {
+            icon = "🟠"
         } else {
             icon = "🟢"
         }
@@ -212,12 +214,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.attributedTitle = attrTitle
 
+        let statusTitle: String
+        if isOffline {
+            statusTitle = "AI Quota Tracker (Offline - Cached)"
+        } else if stats.isStaleRpc {
+            statusTitle = "AI Quota Tracker (Stale)"
+        } else {
+            statusTitle = "AI Quota Tracker (Live Sync)"
+        }
+
         var tipLines = [
-            isOffline ? "AI Quota Tracker (Offline - Cached)" : "AI Quota Tracker (Live Sync)",
+            statusTitle,
             String(format: "Gemini — 5h: %.0f%% | 7d: %.0f%%", stats.calculated5hRemainingPct, stats.calculatedWeeklyRemainingPct)
         ]
         if stats.hasThreePQuota {
-            tipLines.append(String(format: "Claude/GPT — 5h: %.0f%% | 7d: %.0f%%", stats.calculated3p5hRemainingPct, stats.calculated3pWeeklyRemainingPct))
+            let p5Text = (stats.threePFiveHourDisabled == true) ? "Paused" : String(format: "%.0f%%", stats.calculated3p5hRemainingPct)
+            tipLines.append(String(format: "Claude/GPT — 5h: %@ | 7d: %.0f%%", p5Text, stats.calculated3pWeeklyRemainingPct))
         }
         tipLines.append("M3 Ultra — \(stats.formattedSavings) saved (\(stats.formattedFreeTokens) tok · \(stats.formattedSpeed))")
         tipLines.append("Left-click: Toggle HUD · Right-click: Menu")

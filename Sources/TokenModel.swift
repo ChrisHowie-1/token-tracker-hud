@@ -39,6 +39,7 @@ public struct TokenStats: Codable {
     public var weeklyResetTimestamp: Double?
     public var threePFiveHourRemainingPct: Double?
     public var threePWeeklyRemainingPct: Double?
+    public var threePFiveHourDisabled: Bool?
     public var threePFiveHourRefreshTime: String?
     public var threePWeeklyRefreshTime: String?
     public var threePFiveHourResetTimestamp: Double?
@@ -91,6 +92,7 @@ public struct TokenStats: Codable {
         case weeklyResetTimestamp = "weekly_reset_timestamp"
         case threePFiveHourRemainingPct = "three_p_five_hour_remaining_pct"
         case threePWeeklyRemainingPct = "three_p_weekly_remaining_pct"
+        case threePFiveHourDisabled = "three_p_five_hour_disabled"
         case threePFiveHourRefreshTime = "three_p_five_hour_refresh_time"
         case threePWeeklyRefreshTime = "three_p_weekly_refresh_time"
         case threePFiveHourResetTimestamp = "three_p_five_hour_reset_timestamp"
@@ -145,6 +147,7 @@ public struct TokenStats: Codable {
             weeklyResetTimestamp: nil,
             threePFiveHourRemainingPct: nil,
             threePWeeklyRemainingPct: nil,
+            threePFiveHourDisabled: false,
             threePFiveHourRefreshTime: nil,
             threePWeeklyRefreshTime: nil,
             threePFiveHourResetTimestamp: nil,
@@ -185,6 +188,10 @@ public struct TokenStats: Codable {
         return max(0.0, min(100.0, 100.0 - used))
     }
 
+    public var isStaleRpc: Bool {
+        return officialSyncStatus == "STALE_RPC"
+    }
+
     public var hasThreePQuota: Bool {
         return threePFiveHourRemainingPct != nil || threePWeeklyRemainingPct != nil
     }
@@ -203,7 +210,9 @@ public struct TokenStats: Codable {
             QuotaBucketSummary(title: "Gemini 5-Hour", tag: "(G5)", percentage: calculated5hRemainingPct, kind: "G5")
         ]
         if hasThreePQuota {
-            list.append(QuotaBucketSummary(title: "Claude/GPT 5-Hour", tag: "(C5)", percentage: calculated3p5hRemainingPct, kind: "C5"))
+            if threePFiveHourDisabled != true {
+                list.append(QuotaBucketSummary(title: "Claude/GPT 5-Hour", tag: "(C5)", percentage: calculated3p5hRemainingPct, kind: "C5"))
+            }
             list.append(QuotaBucketSummary(title: "Claude/GPT Weekly", tag: "(C7)", percentage: calculated3pWeeklyRemainingPct, kind: "C7"))
         }
         return list
@@ -237,6 +246,14 @@ public struct TokenStats: Codable {
         let spd = lastSpeedTokS ?? 0.0
         if spd > 0.0 {
             return String(format: "%.0f tok/s", spd)
+        }
+        return lastEngine ?? "oMLX"
+    }
+
+    public var formattedCompactSpeed: String {
+        let spd = lastSpeedTokS ?? 0.0
+        if spd > 0.0 {
+            return String(format: "%.0f/s", spd)
         }
         return lastEngine ?? "oMLX"
     }

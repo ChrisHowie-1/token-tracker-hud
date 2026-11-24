@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Official Antigravity Quota Sync & Dual-Stack LAN Daemon
-Queries the official internal language_server RPC endpoint for exact live quotas
-(Gemini + Claude/GPT pools) with zero-fork endpoint caching, updates local_ai_stats.json
+Queries the official Antigravity CLI (`agy -p "/usage" --output-format json`) for exact
+live quotas (Gemini + Claude/GPT pools) at zero token cost, updates local_ai_stats.json
 atomically under flock, and serves telemetry + macOS app auto-updates over dual-stack LAN (port 9587).
 """
 
@@ -13,27 +13,21 @@ import http.server
 import json
 import os
 import re
+import shutil
 import socket
-import ssl
 import subprocess
 import tempfile
 import threading
 import time
-import urllib.request
 
 SOURCE_STATS = "/Users/chrishowie/.gemini/antigravity/local_ai_stats.json"
 PROJECT_BUILD_DIR = "/Users/chrishowie/Antigravity/Personal/Misc/TokenTrackerHUD/build"
 APP_BINARY_PATH = os.path.join(PROJECT_BUILD_DIR, "TokenTrackerHUD.app", "Contents", "MacOS", "TokenTrackerHUD")
 APP_ZIP_PATH = os.path.join(PROJECT_BUILD_DIR, "TokenTrackerHUD.app.zip")
+AGY_BIN = os.environ.get("AGY_BIN", "/Users/chrishowie/.local/bin/agy")
 PORT = 9587
 
-_RPC_LOCK = threading.Lock()
 _APP_HASH_LOCK = threading.Lock()
-_CACHED_RPC = {
-    "pid": None,
-    "ports": [],
-    "csrf_token": None,
-}
 _APP_HASH_CACHE = {
     "mtime": 0.0,
     "size": 0,
@@ -41,96 +35,32 @@ _APP_HASH_CACHE = {
 }
 
 
-def _discover_language_server():
-    """Discover language_server PID, CSRF token, and listening localhost TCP ports (runs only on cache miss)."""
-    try:
-        ps_out = subprocess.check_output(["ps", "-axww", "-o", "pid=,command="], timeout=3).decode(errors="replace")
-        pid = None
-        csrf_token = None
-        for line in ps_out.splitlines():
-            if "language_server" in line and "--csrf_token" in line:
-                parts = line.strip().split(None, 1)
-                if len(parts) == 2:
-                    m = re.search(r"--csrf_token\s+([^\s]+)", parts[1])
-                    if m:
-                        pid = parts[0]
-                        csrf_token = m.group(1)
-                        break
-
-        if not pid or not csrf_token:
-            return None, [], None
-
-        lsof_out = subprocess.check_output(
-            ["lsof", "-p", pid, "-a", "-iTCP", "-sTCP:LISTEN", "-P", "-n"],
-            timeout=3,
-        ).decode(errors="replace")
-        ports = []
-        for line in lsof_out.splitlines():
-            m = re.search(r"127\.0\.0\.1:(\d+)\s+\(LISTEN\)", line)
-            if m:
-                ports.append(m.group(1))
-        return pid, ports, csrf_token
-    except Exception:
-        return None, [], None
-
-
-def _call_quota_rpc(ports, csrf_token):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    payload = json.dumps({"forceRefresh": True}).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "Connect-Protocol-Version": "1",
-        "x-codeium-csrf-token": csrf_token,
-    }
-    for p in ports:
-        url = f"https://127.0.0.1:{p}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=2.0) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if data.get("response", {}).get("groups"):
-                        return data, p
-        except Exception:
-            continue
-    return None, None
-
-
 def fetch_official_quota():
-    """Fetch official quota summary using cached RPC port/token first, falling back to subprocess discovery only when needed."""
-    with _RPC_LOCK:
-        cached_ports = list(_CACHED_RPC["ports"])
-        cached_token = _CACHED_RPC["csrf_token"]
-
-    if cached_ports and cached_token:
-        data, working_port = _call_quota_rpc(cached_ports, cached_token)
-        if data:
-            if cached_ports != [working_port]:
-                with _RPC_LOCK:
-                    _CACHED_RPC["ports"] = [working_port]
-            return data
-
-    pid, ports, csrf_token = _discover_language_server()
-    if not ports or not csrf_token:
-        with _RPC_LOCK:
-            _CACHED_RPC["pid"] = None
-            _CACHED_RPC["ports"] = []
-            _CACHED_RPC["csrf_token"] = None
+    """Fetch official quota summary via `agy -p /usage --output-format json` (zero-token CLI call)."""
+    agy_path = AGY_BIN if os.path.isfile(AGY_BIN) else shutil.which("agy")
+    if not agy_path:
         return None
-
-    data, working_port = _call_quota_rpc(ports, csrf_token)
-    with _RPC_LOCK:
-        if data and working_port:
-            _CACHED_RPC["pid"] = pid
-            _CACHED_RPC["ports"] = [working_port]
-            _CACHED_RPC["csrf_token"] = csrf_token
-        else:
-            _CACHED_RPC["pid"] = None
-            _CACHED_RPC["ports"] = []
-            _CACHED_RPC["csrf_token"] = None
-    return data
+    env = os.environ.copy()
+    env.setdefault("HOME", "/Users/chrishowie")
+    try:
+        res = subprocess.run(
+            [agy_path, "-p", "/usage", "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+        )
+        if res.returncode != 0 or not res.stdout:
+            return None
+        payload = json.loads(res.stdout)
+        if payload.get("status") != "SUCCESS":
+            return None
+        cmd_data = payload.get("command", {}).get("data")
+        if cmd_data and cmd_data.get("groups"):
+            return cmd_data
+    except Exception:
+        pass
+    return None
 
 
 def _parse_reset_ts(reset_iso):
@@ -146,9 +76,10 @@ def _parse_reset_ts(reset_iso):
 def _parse_countdown(desc):
     if not desc:
         return ""
-    if "refresh in " in desc:
-        return desc.split("refresh in ")[-1].rstrip(".")
-    return desc
+    m = re.search(r"refresh(?:es)? in ([^.]+)", desc)
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 def _atomic_update_stats(updates: dict):
@@ -184,49 +115,52 @@ def _atomic_update_stats(updates: dict):
 
 
 def sync_loop():
-    last_stale_mark = 0.0
+    consecutive_failures = 0
     while True:
+        sleep_sec = 30.0
         try:
             official = fetch_official_quota()
             if official:
+                consecutive_failures = 0
                 quota_updates = {
                     "official_sync_status": "LIVE_RPC_SYNC",
+                    "official_sync_source": "agy_cli",
                 }
-                groups = official.get("response", {}).get("groups", [])
+                groups = official.get("groups") or official.get("response", {}).get("groups", [])
                 pool_candidates = []
 
                 for g in groups:
-                    g_name = g.get("displayName", "")
+                    g_name = g.get("name") or g.get("displayName") or ""
                     for b in g.get("buckets", []):
-                        b_id = b.get("bucketId", "")
-                        rf = b.get("remainingFraction")
+                        b_id = b.get("id") or b.get("bucketId") or ""
+                        rf = b.get("remaining_fraction") if "remaining_fraction" in b else b.get("remainingFraction")
                         pct = float(round(rf * 100)) if rf is not None else 100.0
+                        reset_iso = b.get("reset_time") or b.get("resetTime")
+                        reset_ts = _parse_reset_ts(reset_iso)
+                        disabled = bool(b.get("disabled", False))
                         countdown_str = _parse_countdown(b.get("description") or "")
-                        reset_ts = _parse_reset_ts(b.get("resetTime"))
 
                         if b_id == "gemini-5h" or (g_name == "Gemini Models" and b.get("window") == "5h"):
                             quota_updates["five_hour_remaining_pct"] = pct
-                            quota_updates["five_hour_refresh_time"] = countdown_str
-                            if reset_ts:
-                                quota_updates["five_hour_reset_timestamp"] = reset_ts
+                            quota_updates["five_hour_refresh_time"] = countdown_str or "Ready"
+                            quota_updates["five_hour_reset_timestamp"] = reset_ts or 0.0
                             pool_candidates.append((pct, "(G5)"))
                         elif b_id == "gemini-weekly" or (g_name == "Gemini Models" and b.get("window") == "weekly"):
                             quota_updates["weekly_remaining_pct"] = pct
-                            quota_updates["weekly_refresh_time"] = countdown_str
-                            if reset_ts:
-                                quota_updates["weekly_reset_timestamp"] = reset_ts
+                            quota_updates["weekly_refresh_time"] = countdown_str or "Ready"
+                            quota_updates["weekly_reset_timestamp"] = reset_ts or 0.0
                             pool_candidates.append((pct, "(G7)"))
                         elif b_id == "3p-5h" or ("Claude" in g_name and b.get("window") == "5h"):
                             quota_updates["three_p_five_hour_remaining_pct"] = pct
-                            quota_updates["three_p_five_hour_refresh_time"] = countdown_str
-                            if reset_ts:
-                                quota_updates["three_p_five_hour_reset_timestamp"] = reset_ts
-                            pool_candidates.append((pct, "(C5)"))
+                            quota_updates["three_p_five_hour_disabled"] = disabled
+                            quota_updates["three_p_five_hour_refresh_time"] = "Weekly hit" if disabled else (countdown_str or "Ready")
+                            quota_updates["three_p_five_hour_reset_timestamp"] = 0.0 if disabled else (reset_ts or 0.0)
+                            if not disabled:
+                                pool_candidates.append((pct, "(C5)"))
                         elif b_id == "3p-weekly" or ("Claude" in g_name and b.get("window") == "weekly"):
                             quota_updates["three_p_weekly_remaining_pct"] = pct
-                            quota_updates["three_p_weekly_refresh_time"] = countdown_str
-                            if reset_ts:
-                                quota_updates["three_p_weekly_reset_timestamp"] = reset_ts
+                            quota_updates["three_p_weekly_refresh_time"] = countdown_str or "Ready"
+                            quota_updates["three_p_weekly_reset_timestamp"] = reset_ts or 0.0
                             pool_candidates.append((pct, "(C7)"))
 
                 if pool_candidates:
@@ -236,13 +170,14 @@ def sync_loop():
 
                 _atomic_update_stats(quota_updates)
             else:
-                now = time.time()
-                if now - last_stale_mark >= 10.0:
+                consecutive_failures += 1
+                sleep_sec = 15.0
+                if consecutive_failures >= 2:
                     _atomic_update_stats({"official_sync_status": "STALE_RPC"})
-                    last_stale_mark = now
         except Exception:
-            pass
-        time.sleep(2.5)
+            consecutive_failures += 1
+            sleep_sec = 15.0
+        time.sleep(sleep_sec)
 
 
 def _get_app_version_metadata():

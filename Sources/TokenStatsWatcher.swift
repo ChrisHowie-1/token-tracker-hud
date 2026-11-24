@@ -130,7 +130,10 @@ public class TokenStatsWatcher: ObservableObject {
             let mins = (Int(rem) % 3600) / 60
             return "\(hours)h \(mins)m"
         }
-        return fallback ?? "Ready"
+        if let f = fallback?.trimmingCharacters(in: .whitespacesAndNewlines), !f.isEmpty {
+            return f
+        }
+        return "Ready"
     }
 
     private static func formatWeekly(target: Double?, fallback: String?, now: Double) -> String {
@@ -140,7 +143,10 @@ public class TokenStatsWatcher: ObservableObject {
             let hours = Int(round((rem.truncatingRemainder(dividingBy: 86400)) / 3600.0))
             return "\(days)d \(hours)h"
         }
-        return fallback ?? "Ready"
+        if let f = fallback?.trimmingCharacters(in: .whitespacesAndNewlines), !f.isEmpty {
+            return f
+        }
+        return "Ready"
     }
 
     private func updateCountdowns(with source: TokenStats? = nil) {
@@ -149,7 +155,9 @@ public class TokenStatsWatcher: ObservableObject {
 
         let g5 = Self.format5h(target: s.fiveHourResetTimestamp, fallback: s.fiveHourRefreshTime, now: now)
         let g7 = Self.formatWeekly(target: s.weeklyResetTimestamp, fallback: s.weeklyRefreshTime, now: now)
-        let c5 = Self.format5h(target: s.threePFiveHourResetTimestamp, fallback: s.threePFiveHourRefreshTime, now: now)
+        let c5 = (s.threePFiveHourDisabled == true)
+            ? "Weekly hit"
+            : Self.format5h(target: s.threePFiveHourResetTimestamp, fallback: s.threePFiveHourRefreshTime, now: now)
         let c7 = Self.formatWeekly(target: s.threePWeeklyResetTimestamp, fallback: s.threePWeeklyRefreshTime, now: now)
 
         let apply = {
